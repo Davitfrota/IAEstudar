@@ -20,6 +20,7 @@ import {
   generateScheduleSchema,
   nameSchema,
 } from "@/server/schemas";
+import { extractConversationTitle } from "@/server/mcp/agent";
 
 describe("theme", () => {
   it("cycles neo → clay → glass → material → fluent → neo", () => {
@@ -33,6 +34,20 @@ describe("theme", () => {
     expect(isThemeId("fluent")).toBe(true);
     expect(isThemeId("y2k")).toBe(false);
     expect(THEME_META.fluent.label).toBe("Fluent");
+  });
+});
+
+describe("conversation title", () => {
+  it("extracts Título from first assistant line", () => {
+    expect(
+      extractConversationTitle(
+        "Título: Cálculo — prova 15/08\n\nMonteí um plano com pasta e agenda.",
+      ),
+    ).toBe("Cálculo — prova 15/08");
+    expect(extractConversationTitle("Titulo: Biologia Celular")).toBe(
+      "Biologia Celular",
+    );
+    expect(extractConversationTitle("Sem título aqui")).toBeNull();
   });
 });
 

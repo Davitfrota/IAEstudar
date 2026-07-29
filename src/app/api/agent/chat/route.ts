@@ -29,6 +29,8 @@ export async function POST(request: Request) {
               send({ toolPlan: event.toolPlan });
             } else if (event.type === "conversation") {
               send({ conversationId: event.conversationId });
+            } else if (event.type === "conversationTitle") {
+              send({ conversationTitle: event.title });
             } else if (event.type === "error") {
               send({ error: event.message });
             } else if (event.type === "done") {

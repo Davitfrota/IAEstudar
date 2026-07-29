@@ -1,27 +1,64 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AgentChat } from "@/components/AgentChat";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { AgentChat, type AgentChatHandle } from "@/components/AgentChat";
+import { AgentSidePanel } from "@/components/AgentSidePanel";
+import type { ConversationListItem } from "@/server/types/conversation";
+import type { ToolPlanPreview } from "@/components/ToolPlanCard";
 
 export default function AgentePage() {
+  const chatRef = useRef<AgentChatHandle>(null);
+  const [tab, setTab] = useState<"history" | "plan">("history");
+  const [conversations, setConversations] = useState<ConversationListItem[]>(
+    [],
+  );
+  const [activeConversationId, setActiveConversationId] = useState<
+    string | undefined
+  >();
+  const [scheduleLabel, setScheduleLabel] = useState<string | null>(null);
+  const [activePlan, setActivePlan] = useState<ToolPlanPreview | null>(null);
   const [lastPreview, setLastPreview] = useState<{
     tool: string;
     input: unknown;
   } | null>(null);
+  const [loadingList, setLoadingList] = useState(false);
+
+  const loadConversations = useCallback(async () => {
+    setLoadingList(true);
+    try {
+      const res = await fetch("/api/agent/conversations");
+      const json = await res.json();
+      if (res.ok) {
+        setConversations(json.data.conversations ?? []);
+      }
+    } finally {
+      setLoadingList(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadConversations();
+  }, [loadConversations]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <AgentChat
+        ref={chatRef}
         onToolCallPreview={(tool, input) => {
           setLastPreview({ tool, input });
+          setTab("plan");
+        }}
+        onActivePlanChange={(plan) => {
+          setActivePlan(plan);
+          if (plan) setTab("plan");
+        }}
+        onConversationChange={({ conversationId, scheduleLabel: label }) => {
+          setActiveConversationId(conversationId);
+          setScheduleLabel(label ?? null);
+        }}
+        onConversationsInvalidate={() => {
+          void loadConversations();
         }}
         onToolExecuted={(tool) => {
           if (tool === "create_document") toast.success("Documento criado");
@@ -29,30 +66,28 @@ export default function AgentePage() {
           if (tool === "generate_schedule") toast.success("Cronograma gerado");
           if (tool === "generate_form") toast.success("Formulário pronto");
           if (tool === "create_folder") toast.success("Pasta criada");
+          if (tool === "tool_plan") toast.success("Plano executado");
+          void loadConversations();
         }}
       />
-      <Card className="h-fit bg-mint">
-        <CardHeader>
-          <CardTitle>Preview</CardTitle>
-          <p className="text-sm opacity-80">
-            Use o botão Confirmar no chat para persistir schedule/form/update.
-          </p>
-        </CardHeader>
-        <CardContent>
-          {lastPreview ? (
-            <Alert variant="lavender">
-              <AlertTitle>{lastPreview.tool}</AlertTitle>
-              <AlertDescription>
-                <pre className="mt-2 overflow-x-auto text-xs">
-                  {JSON.stringify(lastPreview.input, null, 2)}
-                </pre>
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <p className="text-sm">Nenhuma ferramenta pendente.</p>
-          )}
-        </CardContent>
-      </Card>
+      <AgentSidePanel
+        tab={tab}
+        onTabChange={setTab}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        loading={loadingList}
+        activePlan={activePlan}
+        lastPreview={lastPreview}
+        scheduleLabel={scheduleLabel}
+        onNewChat={() => {
+          chatRef.current?.newChat();
+          setTab("history");
+        }}
+        onSelectConversation={(id) => {
+          void chatRef.current?.openConversation(id);
+          setTab("history");
+        }}
+      />
     </div>
   );
 }

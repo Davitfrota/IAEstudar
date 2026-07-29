@@ -46,6 +46,7 @@ export type ToolPlanPreview = {
 export type PendingPlan = {
   planId: string;
   userId: string;
+  conversationId?: string;
   summary: string;
   steps: PendingPlanStep[];
   estimatedCost?: ToolPlanPreview["estimatedCost"];
@@ -123,6 +124,7 @@ async function pgDelete(planId: string) {
 
 export async function createPendingPlan(input: {
   userId: string;
+  conversationId?: string;
   summary: string;
   steps: Omit<PendingPlanStep, "id" | "status">[];
   estimatedCost?: ToolPlanPreview["estimatedCost"];
@@ -132,6 +134,7 @@ export async function createPendingPlan(input: {
   const plan: PendingPlan = {
     planId: nanoid(12),
     userId: input.userId,
+    conversationId: input.conversationId,
     summary: input.summary,
     steps: input.steps.map((s) => ({
       ...s,

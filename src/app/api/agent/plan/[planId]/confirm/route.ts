@@ -9,6 +9,7 @@ import {
 } from "@/server/pending-plans";
 import { publishPlanProgress } from "@/server/plan-progress";
 import { updatePlanDraftSchema } from "@/server/schemas";
+import { ConversationService } from "@/server/services/conversation-service";
 
 type Params = { params: Promise<{ planId: string }> };
 
@@ -69,6 +70,8 @@ export async function POST(request: Request, { params }: Params) {
         let lastFolderId: string | undefined;
         let lastDocumentId: string | undefined;
         let firstDocumentId: string | undefined;
+        let boundScheduleId: string | undefined;
+        let boundScheduleTitle: string | undefined;
 
         for (const step of plan!.steps) {
           step.status = "running";
@@ -99,7 +102,6 @@ export async function POST(request: Request, { params }: Params) {
             input.folderId = lastFolderId;
           }
           if (step.tool === "generate_form") {
-            // Flashcards a partir do resumo (primeiro doc), não do último arquivo do dia
             const sourceId = firstDocumentId ?? lastDocumentId;
             if (sourceId) {
               input.sourceDocumentId = sourceId;
@@ -146,6 +148,13 @@ export async function POST(request: Request, { params }: Params) {
             lastDocumentId = String(data.documentId);
             firstDocumentId ??= lastDocumentId;
           }
+          if (step.tool === "generate_schedule" && data?.scheduleId) {
+            boundScheduleId = String(data.scheduleId);
+            boundScheduleTitle =
+              typeof step.input.title === "string"
+                ? step.input.title
+                : undefined;
+          }
 
           const progressDone = {
             stepId: step.id,
@@ -162,8 +171,33 @@ export async function POST(request: Request, { params }: Params) {
           });
         }
 
+        let scheduleBound:
+          | { conversationId: string; scheduleId: string; title: string }
+          | undefined;
+
+        if (!failed && boundScheduleId && plan!.conversationId) {
+          try {
+            const bound = await new ConversationService().bindSchedule(
+              user.id,
+              plan!.conversationId,
+              boundScheduleId,
+              boundScheduleTitle ?? plan!.summary,
+            );
+            scheduleBound = {
+              conversationId: plan!.conversationId,
+              scheduleId: bound.scheduleId,
+              title: bound.title,
+            };
+          } catch (err) {
+            console.warn(
+              "[confirm] bindSchedule falhou:",
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+
         const finalPlan = toToolPlanPreview(plan!, failed ? "error" : "done");
-        send({ toolPlan: finalPlan, done: true });
+        send({ toolPlan: finalPlan, done: true, scheduleBound });
         await publishPlanProgress({
           planId,
           userId: user.id,

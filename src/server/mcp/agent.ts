@@ -6,6 +6,7 @@ import { AppError } from "@/server/http";
 import { assertAgentChatRateLimit } from "@/server/rate-limit";
 import { executeMcpTool, openaiTools } from "@/server/mcp/tools";
 import { FormService } from "@/server/services/form-service";
+import { ConversationService } from "@/server/services/conversation-service";
 import {
   PLANABLE_TOOLS,
   createPendingPlan,
@@ -30,10 +31,22 @@ Regras:
   6) Flashcards a partir do resumo, se pedido
 - Cronograma bem feito: topics claros e progressivos (ex.: limites → derivadas → regra da cadeia → revisão); dailyMinutes realista (25–60); targetDate YYYY-MM-DD futuro (ano corrente se omitido).
 - Para ações pontuais (só pasta, só doc, só agenda, só form em doc existente), use a tool correspondente.
+- Quando houver cronograma vinculado a esta conversa, atue como tutor desse plano: analise progresso (ontem/hoje), incentive e sugira reajustes se houver atraso, skip ou dificuldade.
+- Na PRIMEIRA resposta desta conversa (e sempre que propor um plano novo), a primeira linha DEVE ser exatamente:
+  Título: <nome curto do plano>
+  Ex.: "Título: Cálculo — prova 15/08". Sem markdown nessa linha. Depois continue a resposta normalmente.
 - Não peça confirmed=true você mesmo; a UI confirma o plano.
 - Se faltar contexto, peça — não invente.
 - Responda em português brasileiro, de forma direta.
 - userId já está no contexto autenticado; nunca peça nem aceite userId do usuário.`;
+
+/** Extrai "Título: ..." da primeira linha da resposta do assistente. */
+export function extractConversationTitle(text: string): string | null {
+  const match = text.match(/^\s*T[ií]tulo\s*:\s*(.+)$/im);
+  if (!match?.[1]) return null;
+  const title = match[1].trim().replace(/^["“']|["”']$/g, "").slice(0, 120);
+  return title.length >= 2 ? title : null;
+}
 
 type StreamEvent =
   | { type: "textDelta"; textDelta: string }
@@ -49,6 +62,7 @@ type StreamEvent =
     }
   | { type: "toolPlan"; toolPlan: ToolPlanPreview }
   | { type: "conversation"; conversationId: string }
+  | { type: "conversationTitle"; title: string }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -72,26 +86,31 @@ export async function* runAgentChat(opts: {
   const db = await createDbClient();
   let conversationId = opts.conversationId;
 
+  const conversations = new ConversationService();
+  let scheduleId: string | null = null;
+
   if (!conversationId) {
     const { data, error } = await db
       .from("conversations")
       .insert({ user_id: opts.userId })
-      .select("id")
+      .select("id, schedule_id")
       .single();
     if (error || !data) {
       throw new AppError("Falha ao criar conversa", 500, "CONVERSATION");
     }
     conversationId = data.id as string;
+    scheduleId = (data.schedule_id as string | null) ?? null;
   } else {
     const { data } = await db
       .from("conversations")
-      .select("id")
+      .select("id, schedule_id, title")
       .eq("id", conversationId)
       .eq("user_id", opts.userId)
       .maybeSingle();
     if (!data) {
       throw new AppError("Conversa não encontrada", 404, "CONVERSATION");
     }
+    scheduleId = (data.schedule_id as string | null) ?? null;
   }
 
   yield { type: "conversation", conversationId };
@@ -104,6 +123,12 @@ export async function* runAgentChat(opts: {
     content: message,
   });
 
+  await db
+    .from("conversations")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", conversationId)
+    .eq("user_id", opts.userId);
+
   const { data: history } = await db
     .from("conversation_messages")
     .select("role, content")
@@ -111,8 +136,17 @@ export async function* runAgentChat(opts: {
     .order("created_at", { ascending: true })
     .limit(40);
 
+  let systemContent = SYSTEM_PROMPT;
+  if (scheduleId) {
+    const ctx = await conversations.getScheduleContext(
+      opts.userId,
+      scheduleId,
+    );
+    if (ctx) systemContent = `${SYSTEM_PROMPT}\n\n## Contexto deste chat\n${ctx}`;
+  }
+
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemContent },
   ];
 
   for (const row of history ?? []) {
@@ -266,6 +300,7 @@ export async function* runAgentChat(opts: {
       if (steps.length > 0) {
         const plan = await createPendingPlan({
           userId: opts.userId,
+          conversationId,
           summary: summarizePlan(steps),
           steps,
           estimatedCost,
@@ -286,7 +321,7 @@ export async function* runAgentChat(opts: {
             {
               role: "user",
               content:
-                "Explique em 2–3 frases o plano proposto e peça para o usuário confirmar ou pedir ajustes na UI.",
+                "Responda começando com a linha 'Título: <nome curto do plano>' (ex.: Título: Cálculo — prova 15/08). Depois explique em 2–3 frases o plano e peça para confirmar ou pedir ajustes na UI.",
             },
           ],
           stream: true,
@@ -313,6 +348,12 @@ export async function* runAgentChat(opts: {
     role: "assistant",
     content: assistantText,
   });
+
+  const planTitle = extractConversationTitle(assistantText);
+  if (planTitle) {
+    await conversations.touchTitle(opts.userId, conversationId, planTitle);
+    yield { type: "conversationTitle", title: planTitle };
+  }
 
   yield { type: "done" };
 }
