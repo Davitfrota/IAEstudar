@@ -12,7 +12,7 @@ export async function POST(_request: Request, { params }: Params) {
   try {
     const user = await requireAppUser();
     const { planId } = await params;
-    const plan = getPendingPlan(planId);
+    const plan = await getPendingPlan(planId);
 
     if (!plan) {
       return ok({
@@ -30,7 +30,7 @@ export async function POST(_request: Request, { params }: Params) {
       throw new AppError("Plano de outro usuário", 403, "PLAN_FORBIDDEN");
     }
 
-    deletePendingPlan(planId);
+    await deletePendingPlan(planId);
     return ok({
       toolPlan: toToolPlanPreview(plan, "expired"),
       cancelled: true,

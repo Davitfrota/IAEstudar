@@ -305,7 +305,9 @@ export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
           {activePlan ? (
             <ToolPlanCard
               plan={activePlan}
-              disabled={streaming}
+              disabled={streaming && activePlan.status === "awaiting_confirmation"}
+              live
+              onPlanChange={setActivePlan}
               onConfirm={(qs) => void confirmPlan(qs)}
               onCancel={() => void cancelPlan()}
               onRequestEdit={(instruction) => {

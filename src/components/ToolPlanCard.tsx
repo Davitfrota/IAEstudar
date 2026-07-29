@@ -7,6 +7,7 @@ import {
   type FormEstimate,
   type PreviewQuestion,
 } from "@/components/FormQuestionPreviewEditor";
+import { usePlanProgress } from "@/hooks/usePlanProgress";
 
 export type ToolPlanPreview = {
   planId: string;
@@ -26,37 +27,41 @@ export type ToolPlanPreview = {
 type Props = {
   plan: ToolPlanPreview;
   disabled?: boolean;
+  /** Escuta Realtime `plan:{id}` e atualiza checklist (default true se não disabled). */
+  live?: boolean;
+  onPlanChange?: (plan: ToolPlanPreview) => void;
   onConfirm: (draftQuestions?: PreviewQuestion[]) => void;
   onCancel: () => void;
   onRequestEdit: (instruction: string) => void;
 };
 
-export function ToolPlanCard({
+function PlanBody({
   plan,
+  questions,
+  setQuestions,
+  editNote,
+  setEditNote,
+  canAccept,
+  remainingMin,
   disabled,
   onConfirm,
   onCancel,
   onRequestEdit,
-}: Props) {
-  const [questions, setQuestions] = useState<PreviewQuestion[]>(
-    plan.draftQuestions ?? [],
-  );
-  const [editNote, setEditNote] = useState("");
-
-  useEffect(() => {
-    setQuestions(plan.draftQuestions ?? []);
-  }, [plan.planId, plan.draftQuestions]);
-
-  const canAccept = useMemo(() => {
-    if (questions.length === 0) return true;
-    return questions.every((q) => q.prompt.trim() && q.answer.trim());
-  }, [questions]);
-
-  const remainingMs = Math.max(0, plan.expiresAt - Date.now());
-  const remainingMin = Math.ceil(remainingMs / 60000);
-
+}: {
+  plan: ToolPlanPreview;
+  questions: PreviewQuestion[];
+  setQuestions: (q: PreviewQuestion[]) => void;
+  editNote: string;
+  setEditNote: (v: string) => void;
+  canAccept: boolean;
+  remainingMin: number;
+  disabled?: boolean;
+  onConfirm: (draftQuestions?: PreviewQuestion[]) => void;
+  onCancel: () => void;
+  onRequestEdit: (instruction: string) => void;
+}) {
   return (
-    <div className="mt-3 space-y-3 rounded-base border-2 border-border bg-mint p-3 shadow-shadow">
+    <div className="space-y-3">
       <div>
         <p className="font-heading text-sm uppercase">{plan.summary}</p>
         <p className="text-xs opacity-70">
@@ -66,10 +71,10 @@ export function ToolPlanCard({
         </p>
       </div>
 
-      <ul className="space-y-1 text-sm">
+      <ul className="space-y-1 text-sm" aria-live="polite">
         {plan.steps.map((step) => (
           <li key={step.id} className="flex items-start gap-2">
-            <span className="font-heading uppercase">
+            <span className="font-heading uppercase" aria-hidden>
               {step.status === "done"
                 ? "✓"
                 : step.status === "running"
@@ -188,6 +193,124 @@ export function ToolPlanCard({
       <p className="text-[10px] opacity-60">
         Atalhos: Ctrl/Cmd+Enter confirma · Esc cancela
       </p>
+    </div>
+  );
+}
+
+export function ToolPlanCard({
+  plan: planProp,
+  disabled,
+  live,
+  onPlanChange,
+  onConfirm,
+  onCancel,
+  onRequestEdit,
+}: Props) {
+  const [livePlan, setLivePlan] = useState(planProp);
+  const [questions, setQuestions] = useState<PreviewQuestion[]>(
+    planProp.draftQuestions ?? [],
+  );
+  const [editNote, setEditNote] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    setLivePlan(planProp);
+  }, [planProp]);
+
+  useEffect(() => {
+    setQuestions(planProp.draftQuestions ?? []);
+  }, [planProp.planId, planProp.draftQuestions]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  const listen =
+    live ??
+    (!disabled &&
+      (planProp.status === "awaiting_confirmation" ||
+        planProp.status === "executing"));
+
+  usePlanProgress({
+    planId: planProp.planId,
+    enabled: listen,
+    onPlan: (next) => {
+      setLivePlan(next);
+      onPlanChange?.(next);
+    },
+    onStep: (step) => {
+      setLivePlan((prev) => {
+        const next: ToolPlanPreview = {
+          ...prev,
+          status: prev.status === "awaiting_confirmation" ? "executing" : prev.status,
+          steps: prev.steps.map((s) =>
+            s.id === step.stepId ? { ...s, status: step.status } : s,
+          ),
+        };
+        onPlanChange?.(next);
+        return next;
+      });
+    },
+  });
+
+  const plan = livePlan;
+
+  const canAccept = useMemo(() => {
+    if (questions.length === 0) return true;
+    return questions.every((q) => q.prompt.trim() && q.answer.trim());
+  }, [questions]);
+
+  const remainingMs = Math.max(0, plan.expiresAt - Date.now());
+  const remainingMin = Math.ceil(remainingMs / 60000);
+
+  const bodyProps = {
+    plan,
+    questions,
+    setQuestions,
+    editNote,
+    setEditNote,
+    canAccept,
+    remainingMin,
+    disabled,
+    onConfirm,
+    onCancel,
+    onRequestEdit,
+  };
+
+  const asSheet =
+    isMobile &&
+    (plan.status === "awaiting_confirmation" || plan.status === "executing");
+
+  if (asSheet) {
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-40 bg-black/40"
+          aria-hidden
+          onClick={() => {
+            if (plan.status === "awaiting_confirmation" && !disabled) onCancel();
+          }}
+        />
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Plano do agente"
+          className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto rounded-t-base border-2 border-b-0 border-border bg-mint p-4 shadow-shadow animate-[fadeUp_180ms_ease-out]"
+        >
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-border" />
+          <PlanBody {...bodyProps} />
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-3 rounded-base border-2 border-border bg-mint p-3 shadow-shadow">
+      <PlanBody {...bodyProps} />
     </div>
   );
 }

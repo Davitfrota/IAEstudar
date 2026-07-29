@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { createDbClient } from "@/lib/supabase/admin";
 
 export type PlanStepStatus = "pending" | "running" | "done" | "error";
 
@@ -21,7 +22,12 @@ export type DraftFormQuestion = {
 export type ToolPlanPreview = {
   planId: string;
   summary: string;
-  steps: { tool: string; description: string; id: string; status: PlanStepStatus }[];
+  steps: {
+    tool: string;
+    description: string;
+    id: string;
+    status: PlanStepStatus;
+  }[];
   estimatedCost?: {
     questionCount?: number;
     estimatedCredits?: number;
@@ -45,26 +51,100 @@ export type PendingPlan = {
   expiresAt: number;
 };
 
-const TTL_MS = 10 * 60 * 1000;
+export const TTL_MS = 10 * 60 * 1000;
+const REDIS_PREFIX = "pending_plan:";
 
-/** Em memória (Fase 2). Trocar por Redis (`pending_plan:{id}`, TTL 10m) em produção. */
-const plans = new Map<string, PendingPlan>();
+/** Fallback local (dev sem Redis/DB). */
+const memory = new Map<string, PendingPlan>();
 
-function prune() {
+function pruneMemory() {
   const now = Date.now();
-  for (const [id, plan] of plans) {
-    if (plan.expiresAt <= now) plans.delete(id);
+  for (const [id, plan] of memory) {
+    if (plan.expiresAt <= now) memory.delete(id);
   }
 }
 
-export function createPendingPlan(input: {
+async function redisGetSet() {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (url && token) {
+    const { Redis } = await import("@upstash/redis");
+    return new Redis({ url, token });
+  }
+
+  const redisUrl = process.env.REDIS_URL;
+  if (redisUrl) {
+    const Redis = (await import("ioredis")).default;
+    const client = new Redis(redisUrl, {
+      maxRetriesPerRequest: 1,
+      lazyConnect: true,
+    });
+    if (client.status === "wait") {
+      await client.connect().catch(() => undefined);
+    }
+    return {
+      async get(key: string) {
+        const v = await client.get(key);
+        return v ? (JSON.parse(v) as PendingPlan) : null;
+      },
+      async set(key: string, value: PendingPlan, opts?: { ex?: number }) {
+        const payload = JSON.stringify(value);
+        if (opts?.ex) await client.set(key, payload, "EX", opts.ex);
+        else await client.set(key, payload);
+      },
+      async del(key: string) {
+        await client.del(key);
+      },
+    };
+  }
+
+  return null;
+}
+
+async function pgSave(plan: PendingPlan) {
+  const db = await createDbClient();
+  await db.from("pending_agent_plans").upsert({
+    plan_id: plan.planId,
+    user_id: plan.userId,
+    payload: plan,
+    expires_at: new Date(plan.expiresAt).toISOString(),
+    created_at: new Date(plan.createdAt).toISOString(),
+  });
+}
+
+async function pgGet(planId: string): Promise<PendingPlan | null> {
+  const db = await createDbClient();
+  await db
+    .from("pending_agent_plans")
+    .delete()
+    .lt("expires_at", new Date().toISOString());
+
+  const { data, error } = await db
+    .from("pending_agent_plans")
+    .select("payload, expires_at")
+    .eq("plan_id", planId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  if (new Date(data.expires_at as string).getTime() <= Date.now()) {
+    await db.from("pending_agent_plans").delete().eq("plan_id", planId);
+    return null;
+  }
+  return data.payload as PendingPlan;
+}
+
+async function pgDelete(planId: string) {
+  const db = await createDbClient();
+  await db.from("pending_agent_plans").delete().eq("plan_id", planId);
+}
+
+export async function createPendingPlan(input: {
   userId: string;
   summary: string;
   steps: Omit<PendingPlanStep, "id" | "status">[];
   estimatedCost?: ToolPlanPreview["estimatedCost"];
   draftQuestions?: DraftFormQuestion[];
-}): PendingPlan {
-  prune();
+}): Promise<PendingPlan> {
   const now = Date.now();
   const plan: PendingPlan = {
     planId: nanoid(12),
@@ -80,28 +160,84 @@ export function createPendingPlan(input: {
     createdAt: now,
     expiresAt: now + TTL_MS,
   };
-  plans.set(plan.planId, plan);
+
+  const redis = await redisGetSet();
+  if (redis) {
+    await redis.set(`${REDIS_PREFIX}${plan.planId}`, plan, {
+      ex: Math.ceil(TTL_MS / 1000),
+    });
+  }
+
+  try {
+    await pgSave(plan);
+  } catch {
+    pruneMemory();
+    memory.set(plan.planId, plan);
+  }
+
   return plan;
 }
 
-export function getPendingPlan(planId: string): PendingPlan | null {
-  prune();
-  return plans.get(planId) ?? null;
+export async function getPendingPlan(
+  planId: string,
+): Promise<PendingPlan | null> {
+  const redis = await redisGetSet();
+  if (redis) {
+    const fromRedis = await redis.get(`${REDIS_PREFIX}${planId}`);
+    if (fromRedis) {
+      const plan =
+        typeof fromRedis === "string"
+          ? (JSON.parse(fromRedis) as PendingPlan)
+          : (fromRedis as PendingPlan);
+      if (plan.expiresAt > Date.now()) return plan;
+      await redis.del(`${REDIS_PREFIX}${planId}`);
+    }
+  }
+
+  try {
+    const fromPg = await pgGet(planId);
+    if (fromPg) return fromPg;
+  } catch {
+    // ignore
+  }
+
+  pruneMemory();
+  const mem = memory.get(planId);
+  if (mem && mem.expiresAt > Date.now()) return mem;
+  if (mem) memory.delete(planId);
+  return null;
 }
 
-export function updatePendingPlan(
+export async function updatePendingPlan(
   planId: string,
   patch: Partial<Pick<PendingPlan, "draftQuestions" | "steps" | "summary">>,
-): PendingPlan | null {
-  const plan = getPendingPlan(planId);
+): Promise<PendingPlan | null> {
+  const plan = await getPendingPlan(planId);
   if (!plan) return null;
   Object.assign(plan, patch);
-  plans.set(planId, plan);
+
+  const redis = await redisGetSet();
+  const ttlSec = Math.max(1, Math.ceil((plan.expiresAt - Date.now()) / 1000));
+  if (redis) {
+    await redis.set(`${REDIS_PREFIX}${planId}`, plan, { ex: ttlSec });
+  }
+  try {
+    await pgSave(plan);
+  } catch {
+    memory.set(planId, plan);
+  }
   return plan;
 }
 
-export function deletePendingPlan(planId: string) {
-  plans.delete(planId);
+export async function deletePendingPlan(planId: string) {
+  const redis = await redisGetSet();
+  if (redis) await redis.del(`${REDIS_PREFIX}${planId}`);
+  try {
+    await pgDelete(planId);
+  } catch {
+    // ignore
+  }
+  memory.delete(planId);
 }
 
 export function toToolPlanPreview(

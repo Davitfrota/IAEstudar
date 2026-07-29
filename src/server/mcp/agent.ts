@@ -288,7 +288,7 @@ export async function* runAgentChat(opts: {
       }
 
       if (steps.length > 0) {
-        const plan = createPendingPlan({
+        const plan = await createPendingPlan({
           userId: opts.userId,
           summary: summarizePlan(steps),
           steps,

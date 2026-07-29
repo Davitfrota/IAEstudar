@@ -7,6 +7,7 @@ import {
   toToolPlanPreview,
   updatePendingPlan,
 } from "@/server/pending-plans";
+import { publishPlanProgress } from "@/server/plan-progress";
 import { updatePlanDraftSchema } from "@/server/schemas";
 
 type Params = { params: Promise<{ planId: string }> };
@@ -15,24 +16,20 @@ export async function POST(request: Request, { params }: Params) {
   try {
     const user = await requireAppUser();
     const { planId } = await params;
-    const plan = getPendingPlan(planId);
+    let plan = await getPendingPlan(planId);
 
     if (!plan || plan.expiresAt <= Date.now()) {
-      if (plan) deletePendingPlan(planId);
+      if (plan) await deletePendingPlan(planId);
       throw new AppError("Plano expirado ou inexistente", 410, "PLAN_EXPIRED");
     }
     if (plan.userId !== user.id) {
       throw new AppError("Plano de outro usuário", 403, "PLAN_FORBIDDEN");
     }
 
-    // Atualiza rascunho de perguntas se enviado
     try {
       const body = await request.json();
       const parsed = updatePlanDraftSchema.safeParse(body);
       if (parsed.success && parsed.data.draftQuestions) {
-        updatePendingPlan(planId, {
-          draftQuestions: parsed.data.draftQuestions,
-        });
         for (const step of plan.steps) {
           if (step.tool === "generate_form") {
             step.input = {
@@ -42,6 +39,11 @@ export async function POST(request: Request, { params }: Params) {
             };
           }
         }
+        plan =
+          (await updatePendingPlan(planId, {
+            draftQuestions: parsed.data.draftQuestions,
+            steps: plan.steps,
+          })) ?? plan;
       }
     } catch {
       // body vazio ok
@@ -54,20 +56,32 @@ export async function POST(request: Request, { params }: Params) {
           controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
         };
 
-        send({
-          toolPlan: toToolPlanPreview(plan, "executing"),
+        const executing = toToolPlanPreview(plan!, "executing");
+        send({ toolPlan: executing });
+        await publishPlanProgress({
+          planId,
+          userId: user.id,
+          event: "plan",
+          toolPlan: executing,
         });
 
         let failed = false;
 
-        for (const step of plan.steps) {
+        for (const step of plan!.steps) {
           step.status = "running";
-          send({
-            stepProgress: {
-              stepId: step.id,
-              tool: step.tool,
-              status: "running",
-            },
+          await updatePendingPlan(planId, { steps: plan!.steps });
+
+          const progressRunning = {
+            stepId: step.id,
+            tool: step.tool,
+            status: "running" as const,
+          };
+          send({ stepProgress: progressRunning });
+          await publishPlanProgress({
+            planId,
+            userId: user.id,
+            event: "step",
+            step: progressRunning,
           });
 
           const input =
@@ -79,10 +93,10 @@ export async function POST(request: Request, { params }: Params) {
 
           if (
             step.tool === "generate_form" &&
-            plan.draftQuestions?.length &&
+            plan!.draftQuestions?.length &&
             !input.questions
           ) {
-            input.questions = plan.draftQuestions;
+            input.questions = plan!.draftQuestions;
           }
 
           const result = await executeMcpTool(
@@ -95,35 +109,49 @@ export async function POST(request: Request, { params }: Params) {
             failed = true;
             step.status = "error";
             step.error = result.error;
-            send({
-              stepProgress: {
-                stepId: step.id,
-                tool: step.tool,
-                status: "error",
-                error: result.error,
-              },
+            const progressError = {
+              stepId: step.id,
+              tool: step.tool,
+              status: "error" as const,
+              error: result.error,
+            };
+            send({ stepProgress: progressError });
+            await publishPlanProgress({
+              planId,
+              userId: user.id,
+              event: "step",
+              step: progressError,
             });
             break;
           }
 
           step.status = "done";
           step.result = result.data;
-          send({
-            stepProgress: {
-              stepId: step.id,
-              tool: step.tool,
-              status: "done",
-              result: result.data,
-            },
+          const progressDone = {
+            stepId: step.id,
+            tool: step.tool,
+            status: "done" as const,
+            result: result.data,
+          };
+          send({ stepProgress: progressDone });
+          await publishPlanProgress({
+            planId,
+            userId: user.id,
+            event: "step",
+            step: progressDone,
           });
         }
 
-        send({
-          toolPlan: toToolPlanPreview(plan, failed ? "error" : "done"),
-          done: true,
+        const finalPlan = toToolPlanPreview(plan!, failed ? "error" : "done");
+        send({ toolPlan: finalPlan, done: true });
+        await publishPlanProgress({
+          planId,
+          userId: user.id,
+          event: "plan",
+          toolPlan: finalPlan,
         });
 
-        deletePendingPlan(planId);
+        await deletePendingPlan(planId);
         controller.close();
       },
     });

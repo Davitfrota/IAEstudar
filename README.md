@@ -35,6 +35,9 @@ Rotas: `/sign-in`, `/sign-up`, `/pastas`, `/agenda`, `/formularios`, `/agente`.
 ## Fase 2 (UX do agente + interface real)
 
 - Plano consolidado (`ToolPlanCard`) com TTL 10 min + confirm/cancel
+- Pending plans: Redis (Upstash/`REDIS_URL`) → Postgres → memória
+- Checklist do plano via Realtime `plan:{planId}` (+ NDJSON)
+- Bottom-sheet mobile no plano; swipe na prática (← again / → good)
 - Preview editável de cards + estimativa de custo
 - Calendário com drag & drop (`PATCH /api/schedule-items`)
 - Fila de prática via `GET /api/practice/queue` + `practice_sessions`
