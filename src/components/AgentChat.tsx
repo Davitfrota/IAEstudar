@@ -1,103 +1,62 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
-  FormQuestionPreviewEditor,
-  type FormEstimate,
-  type PreviewQuestion,
-} from "@/components/FormQuestionPreviewEditor";
-
-type ToolCallEvent = {
-  name: string;
-  input: unknown;
-  status: "pending_confirmation" | "executed" | "error";
-  result?: unknown;
-  error?: string;
-};
+  ToolPlanCard,
+  type ToolPlanPreview,
+} from "@/components/ToolPlanCard";
+import type { PreviewQuestion } from "@/components/FormQuestionPreviewEditor";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  toolCalls?: ToolCallEvent[];
+  toolPlan?: ToolPlanPreview;
 };
-
-type ConfirmableTool = "generate_schedule" | "generate_form" | "update_document";
 
 type Props = {
-  onToolCallPreview: (tool: string, input: unknown) => void;
+  onToolCallPreview?: (tool: string, input: unknown) => void;
   onToolExecuted?: (tool: string) => void;
 };
-
-function isConfirmable(name: string): name is ConfirmableTool {
-  return (
-    name === "generate_schedule" ||
-    name === "generate_form" ||
-    name === "update_document"
-  );
-}
-
-function extractFormPreview(result: unknown): {
-  questions: PreviewQuestion[];
-  estimate: FormEstimate | null;
-} | null {
-  if (!result || typeof result !== "object") return null;
-  const preview = (result as { preview?: unknown }).preview;
-  if (!preview || typeof preview !== "object") return null;
-  const p = preview as {
-    questions?: PreviewQuestion[];
-    estimate?: FormEstimate;
-  };
-  if (!Array.isArray(p.questions) || p.questions.length === 0) return null;
-  return {
-    questions: p.questions,
-    estimate: p.estimate ?? null,
-  };
-}
 
 export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [streaming, setStreaming] = useState(false);
-  const [pendingConfirm, setPendingConfirm] = useState<{
-    name: ConfirmableTool;
-    input: Record<string, unknown>;
-  } | null>(null);
-  const [formDraft, setFormDraft] = useState<{
-    questions: PreviewQuestion[];
-    estimate: FormEstimate | null;
-  } | null>(null);
+  const [activePlan, setActivePlan] = useState<ToolPlanPreview | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const consumeStream = useCallback(
-    async (
-      body: Record<string, unknown>,
-      assistantId: string,
-      userContent: string,
-    ) => {
+  const send = useCallback(
+    async (text: string) => {
+      if (!text.trim() || streaming) return;
+      const assistantId = crypto.randomUUID();
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "user",
-        content: userContent,
+        content: text.trim(),
       };
 
       setMessages((prev) => [
         ...prev,
         userMsg,
-        { id: assistantId, role: "assistant", content: "", toolCalls: [] },
+        { id: assistantId, role: "assistant", content: "" },
       ]);
+      setInput("");
       setStreaming(true);
 
       try {
         const res = await fetch("/api/agent/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            message: text.trim(),
+            conversationId,
+          }),
         });
 
         if (!res.ok || !res.body) {
@@ -120,14 +79,13 @@ export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
             if (!line.trim()) continue;
             const event = JSON.parse(line) as {
               textDelta?: string;
-              toolCall?: ToolCallEvent;
+              toolPlan?: ToolPlanPreview;
               conversationId?: string;
               error?: string;
+              toolCall?: { name: string; status: string; input?: unknown };
             };
 
-            if (event.conversationId) {
-              setConversationId(event.conversationId);
-            }
+            if (event.conversationId) setConversationId(event.conversationId);
 
             if (event.textDelta) {
               setMessages((prev) =>
@@ -139,50 +97,27 @@ export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
               );
             }
 
-            if (event.toolCall) {
-              if (event.toolCall.status === "pending_confirmation") {
-                onToolCallPreview(event.toolCall.name, event.toolCall.input);
-                if (isConfirmable(event.toolCall.name)) {
-                  setPendingConfirm({
-                    name: event.toolCall.name,
-                    input: (event.toolCall.input ?? {}) as Record<
-                      string,
-                      unknown
-                    >,
-                  });
-                }
-                if (event.toolCall.name === "generate_form") {
-                  const draft = extractFormPreview(event.toolCall.result);
-                  setFormDraft(draft);
-                } else {
-                  setFormDraft(null);
-                }
-              } else if (event.toolCall.status === "executed") {
-                setPendingConfirm(null);
-                setFormDraft(null);
-                onToolExecuted?.(event.toolCall.name);
-              }
-
+            if (event.toolPlan) {
+              setActivePlan(event.toolPlan);
+              onToolCallPreview?.("tool_plan", event.toolPlan);
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? {
-                        ...m,
-                        toolCalls: [...(m.toolCalls ?? []), event.toolCall!],
-                      }
+                    ? { ...m, toolPlan: event.toolPlan }
                     : m,
                 ),
               );
+            }
+
+            if (event.toolCall?.status === "executed") {
+              onToolExecuted?.(event.toolCall.name);
             }
 
             if (event.error) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? {
-                        ...m,
-                        content: m.content || `Erro: ${event.error}`,
-                      }
+                    ? { ...m, content: m.content || `Erro: ${event.error}` }
                     : m,
                 ),
               );
@@ -208,52 +143,128 @@ export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
       }
     },
-    [onToolCallPreview, onToolExecuted],
+    [conversationId, streaming, onToolCallPreview, onToolExecuted],
   );
 
-  const send = async (text: string) => {
-    if (!text.trim() || streaming) return;
-    const assistantId = crypto.randomUUID();
-    setInput("");
-    await consumeStream(
-      { message: text.trim(), conversationId },
-      assistantId,
-      text.trim(),
-    );
-  };
-
-  const confirmPending = async () => {
-    if (!pendingConfirm || streaming) return;
-    const assistantId = crypto.randomUUID();
-    const inputPayload =
-      pendingConfirm.name === "generate_form" && formDraft
-        ? {
-            ...pendingConfirm.input,
-            questions: formDraft.questions.filter(
-              (q) => q.prompt.trim() && q.answer.trim(),
-            ),
-          }
-        : pendingConfirm.input;
-
-    await consumeStream(
-      {
-        conversationId,
-        confirmTool: {
-          name: pendingConfirm.name,
-          input: inputPayload,
+  const confirmPlan = async (draftQuestions?: PreviewQuestion[]) => {
+    if (!activePlan || streaming) return;
+    setStreaming(true);
+    try {
+      const res = await fetch(
+        `/api/agent/plan/${activePlan.planId}/confirm`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            draftQuestions ? { draftQuestions } : {},
+          ),
         },
-      },
-      assistantId,
-      `Confirmar ${pendingConfirm.name}`,
+      );
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message ?? "Falha ao confirmar");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let plan: ToolPlanPreview = { ...activePlan, status: "executing" };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as {
+            toolPlan?: ToolPlanPreview;
+            stepProgress?: {
+              stepId: string;
+              status: "running" | "done" | "error";
+              error?: string;
+            };
+          };
+          if (event.toolPlan) {
+            plan = event.toolPlan;
+            setActivePlan(event.toolPlan);
+          }
+          if (event.stepProgress) {
+            plan = {
+              ...plan,
+              steps: plan.steps.map((s) =>
+                s.id === event.stepProgress!.stepId
+                  ? { ...s, status: event.stepProgress!.status }
+                  : s,
+              ),
+            };
+            setActivePlan(plan);
+          }
+        }
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content:
+            plan.status === "done"
+              ? "Plano executado com sucesso."
+              : "Plano terminou com erro em algum passo.",
+          toolPlan: plan,
+        },
+      ]);
+      onToolExecuted?.("tool_plan");
+      if (plan.status === "done") setActivePlan(null);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content:
+            error instanceof Error ? error.message : "Falha na confirmação",
+        },
+      ]);
+    } finally {
+      setStreaming(false);
+    }
+  };
+
+  const cancelPlan = async () => {
+    if (!activePlan) return;
+    await fetch(`/api/agent/plan/${activePlan.planId}/cancel`, {
+      method: "POST",
+    });
+    setActivePlan((p) =>
+      p ? { ...p, status: "expired" } : null,
     );
   };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!activePlan || activePlan.status !== "awaiting_confirmation") return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        void cancelPlan();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        void confirmPlan(activePlan.draftQuestions);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   return (
     <Card className="flex h-full min-h-[70vh] flex-col overflow-hidden">
       <CardHeader>
         <CardTitle className="uppercase">Agente</CardTitle>
         <p className="text-sm opacity-80">
-          Peça para organizar matéria, cronograma ou formulário.
+          Digite o que precisa estudar — o plano aparece pra você confirmar.
         </p>
       </CardHeader>
 
@@ -261,92 +272,51 @@ export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
         <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {messages.length === 0 ? (
             <Alert>
-              <AlertTitle>Dica</AlertTitle>
+              <AlertTitle>Experimente</AlertTitle>
               <AlertDescription>
-                Ex.: “Cria uma pasta de Direito Tributário, um documento com
-                introdução à CBS e um cronograma até 15/08 com 5 tópicos.”
+                “Preciso estudar cálculo até dia 15” — pasta, documento,
+                cronograma e formulário num plano só.
               </AlertDescription>
             </Alert>
           ) : null}
+
           {messages.map((m) => (
             <div
               key={m.id}
-              className={`max-w-[90%] rounded-base border-2 border-border px-3 py-2 text-sm shadow-shadow transition-transform duration-200 ${
+              className={`max-w-[95%] rounded-base border-2 border-border px-3 py-2 text-sm shadow-shadow ${
                 m.role === "user"
                   ? "ml-auto bg-main text-main-foreground"
                   : "bg-lavender"
               }`}
             >
               <p className="whitespace-pre-wrap font-base">{m.content}</p>
-              {m.toolCalls?.map((t, idx) => (
-                <div
-                  key={`${t.name}-${idx}`}
-                  className="mt-2 rounded-base border-2 border-border bg-mint p-2 text-xs"
-                >
-                  <p className="font-heading uppercase">
-                    {t.name} · {t.status}
-                  </p>
-                  {t.name === "generate_form" &&
-                  t.status === "pending_confirmation" ? (
-                    <p className="mt-1 opacity-80">
-                      Edite os cards abaixo antes de confirmar.
-                    </p>
-                  ) : t.status === "pending_confirmation" && t.result ? (
-                    <pre className="mt-1 overflow-x-auto">
-                      {JSON.stringify(t.result, null, 2)}
-                    </pre>
-                  ) : (
-                    <pre className="mt-1 overflow-x-auto">
-                      {JSON.stringify(t.input, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              ))}
+              {m.toolPlan && m.toolPlan.planId !== activePlan?.planId ? (
+                <ToolPlanCard
+                  plan={m.toolPlan}
+                  disabled
+                  onConfirm={() => undefined}
+                  onCancel={() => undefined}
+                  onRequestEdit={() => undefined}
+                />
+              ) : null}
             </div>
           ))}
+
+          {activePlan ? (
+            <ToolPlanCard
+              plan={activePlan}
+              disabled={streaming}
+              onConfirm={(qs) => void confirmPlan(qs)}
+              onCancel={() => void cancelPlan()}
+              onRequestEdit={(instruction) => {
+                void cancelPlan().then(() =>
+                  send(`Ajuste o plano: ${instruction}`),
+                );
+              }}
+            />
+          ) : null}
           <div ref={bottomRef} />
         </div>
-
-        {pendingConfirm?.name === "generate_form" && formDraft ? (
-          <FormQuestionPreviewEditor
-            questions={formDraft.questions}
-            estimate={formDraft.estimate}
-            disabled={streaming}
-            onChange={(questions) =>
-              setFormDraft((prev) =>
-                prev ? { ...prev, questions } : { questions, estimate: null },
-              )
-            }
-            onConfirm={() => void confirmPending()}
-            onCancel={() => {
-              setPendingConfirm(null);
-              setFormDraft(null);
-            }}
-          />
-        ) : pendingConfirm ? (
-          <div className="flex flex-wrap items-center gap-2 border-t-2 border-border bg-pink/40 px-3 py-2">
-            <p className="flex-1 text-sm font-heading uppercase">
-              Confirmar {pendingConfirm.name}?
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              disabled={streaming}
-              onClick={() => void confirmPending()}
-            >
-              Confirmar
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="neutral"
-              disabled={streaming}
-              onClick={() => setPendingConfirm(null)}
-            >
-              Cancelar
-            </Button>
-          </div>
-        ) : null}
 
         <form
           className="flex gap-2 border-t-2 border-border p-3"

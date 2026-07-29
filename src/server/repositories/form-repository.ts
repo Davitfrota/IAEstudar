@@ -224,6 +224,7 @@ export class FormRepository {
     rating: string;
     stateBefore: FsrsCardState;
     stateAfter: FsrsCardState;
+    sessionId?: string | null;
   }): Promise<void> {
     const { error } = await this.db.from("form_reviews").insert({
       form_question_id: input.formQuestionId,
@@ -231,9 +232,49 @@ export class FormRepository {
       rating: input.rating,
       state_before: input.stateBefore,
       state_after: input.stateAfter,
+      session_id: input.sessionId ?? null,
     });
 
     if (error) throw error;
+  }
+
+  async createPracticeSession(
+    userId: string,
+    formId?: string | null,
+  ): Promise<{ id: string }> {
+    const { data, error } = await this.db
+      .from("practice_sessions")
+      .insert({
+        user_id: userId,
+        form_id: formId ?? null,
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data as { id: string };
+  }
+
+  async sessionStats(sessionId: string) {
+    const { data, error } = await this.db
+      .from("form_reviews")
+      .select("rating")
+      .eq("session_id", sessionId);
+    if (error) throw error;
+    const stats = {
+      reviewed: 0,
+      again: 0,
+      hard: 0,
+      good: 0,
+      easy: 0,
+    };
+    for (const row of data ?? []) {
+      stats.reviewed += 1;
+      const r = row.rating as keyof typeof stats;
+      if (r in stats && r !== "reviewed") {
+        stats[r] += 1;
+      }
+    }
+    return stats;
   }
 
   async countDue(userId: string): Promise<number> {

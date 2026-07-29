@@ -144,6 +144,29 @@ export class FormService {
     return (await this.forms()).listDueForForm(userId, formId);
   }
 
+  async startPracticeSession(userId: string, formId?: string) {
+    return (await this.forms()).createPracticeSession(userId, formId);
+  }
+
+  async getPracticeQueue(
+    userId: string,
+    opts: { formId?: string; date?: string; limit: number },
+  ) {
+    const repo = await this.forms();
+    const all = opts.formId
+      ? await repo.listDueForForm(userId, opts.formId)
+      : await repo.listDue(userId, { date: opts.date });
+    const totalDue = all.length;
+    return {
+      questions: all.slice(0, opts.limit),
+      totalDue,
+    };
+  }
+
+  async getSessionStats(sessionId: string) {
+    return (await this.forms()).sessionStats(sessionId);
+  }
+
   async softDelete(userId: string, formId: string) {
     await this.get(userId, formId);
     await (await this.forms()).softDelete(userId, formId);
@@ -308,7 +331,12 @@ export class FormService {
     return parsed.questions.slice(0, input.questionCount);
   }
 
-  async recordReview(userId: string, formQuestionId: string, rating: FsrsRating) {
+  async recordReview(
+    userId: string,
+    formQuestionId: string,
+    rating: FsrsRating,
+    sessionId?: string,
+  ) {
     const repo = await this.forms();
     const question = await repo.getQuestionOwned(userId, formQuestionId);
     if (!question) {
@@ -327,6 +355,7 @@ export class FormService {
       rating,
       stateBefore,
       stateAfter,
+      sessionId,
     });
 
     await repo.updateFsrsState(formQuestionId, stateAfter);

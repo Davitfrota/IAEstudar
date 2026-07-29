@@ -13,24 +13,40 @@ type FormQuestion = {
   choices?: unknown;
 };
 
-type Props = {
-  formId: string;
-  questions: FormQuestion[];
-  onRate: (questionId: string, rating: FsrsRating) => Promise<void>;
+type SessionStats = {
+  reviewed: number;
+  again: number;
+  hard: number;
+  good: number;
+  easy: number;
 };
 
-const ratings: { rating: FsrsRating; label: string; shortcut: string; color: string }[] =
-  [
-    { rating: "again", label: "Again", shortcut: "1", color: "var(--chart-2)" },
-    { rating: "hard", label: "Hard", shortcut: "2", color: "var(--chart-3)" },
-    { rating: "good", label: "Good", shortcut: "3", color: "var(--chart-4)" },
-    { rating: "easy", label: "Easy", shortcut: "4", color: "var(--chart-1)" },
-  ];
+type Props = {
+  formId?: string;
+  questions: FormQuestion[];
+  onRate: (questionId: string, rating: FsrsRating) => Promise<void>;
+  sessionStats?: SessionStats;
+};
 
-export function PracticeQueue({ questions, onRate }: Props) {
+const ratings: {
+  rating: FsrsRating;
+  label: string;
+  shortcut: string;
+  color: string;
+}[] = [
+  { rating: "again", label: "Again", shortcut: "1", color: "var(--chart-2)" },
+  { rating: "hard", label: "Hard", shortcut: "2", color: "var(--chart-3)" },
+  { rating: "good", label: "Good", shortcut: "3", color: "var(--chart-4)" },
+  { rating: "easy", label: "Easy", shortcut: "4", color: "var(--chart-1)" },
+];
+
+export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
   const [revealed, setRevealed] = useState(false);
   const [pending, setPending] = useState(false);
   const [queue, setQueue] = useState(questions);
+  const [stats, setStats] = useState<SessionStats>(
+    sessionStats ?? { reviewed: 0, again: 0, hard: 0, good: 0, easy: 0 },
+  );
 
   useEffect(() => {
     setQueue(questions);
@@ -42,10 +58,15 @@ export function PracticeQueue({ questions, onRate }: Props) {
   const handleRate = async (rating: FsrsRating) => {
     if (!current || pending || !revealed) return;
     setPending(true);
+    setQueue((q) => q.filter((item) => item.id !== current.id));
+    setRevealed(false);
+    setStats((s) => ({
+      ...s,
+      reviewed: s.reviewed + 1,
+      [rating]: s[rating] + 1,
+    }));
     try {
       await onRate(current.id, rating);
-      setQueue((q) => q.filter((item) => item.id !== current.id));
-      setRevealed(false);
     } finally {
       setPending(false);
     }
@@ -53,7 +74,6 @@ export function PracticeQueue({ questions, onRate }: Props) {
 
   useEffect(() => {
     if (!current) return;
-
     const onKey = (e: KeyboardEvent) => {
       if (
         e.target instanceof HTMLInputElement ||
@@ -74,26 +94,25 @@ export function PracticeQueue({ questions, onRate }: Props) {
         "4": "easy",
       };
       const rating = map[e.key];
-      if (!rating) return;
-      e.preventDefault();
-      void (async () => {
-        setPending(true);
-        try {
-          await onRate(current.id, rating);
-          setQueue((q) => q.filter((item) => item.id !== current.id));
-          setRevealed(false);
-        } finally {
-          setPending(false);
-        }
-      })();
+      if (rating) {
+        e.preventDefault();
+        void handleRate(rating);
+      }
     };
-
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, revealed, pending, onRate]);
+  });
 
   if (!current) {
-    return null;
+    return (
+      <div className="space-y-2 text-center">
+        <p className="font-heading text-xl uppercase">Sessão concluída</p>
+        <p className="text-sm opacity-80">
+          Revisados {stats.reviewed} · again {stats.again} · hard {stats.hard} ·
+          good {stats.good} · easy {stats.easy}
+        </p>
+      </div>
+    );
   }
 
   const choices = Array.isArray(current.choices)
@@ -102,17 +121,18 @@ export function PracticeQueue({ questions, onRate }: Props) {
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
-      <p className="font-heading text-sm uppercase">
-        {queue.length} card{queue.length === 1 ? "" : "s"} due
-        <span className="ml-2 opacity-60 normal-case">
-          Espaço = revelar · 1–4 = rating
-        </span>
-      </p>
-      <Card className="transition-transform duration-200">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-heading text-sm uppercase">
+          {queue.length} restantes · {stats.reviewed} feitos
+        </p>
+        <p className="text-xs opacity-60">Espaço = virar · 1–4 = rating</p>
+      </div>
+
+      <Card className="transition-transform duration-150">
         <CardContent className="p-6">
           <p className="font-heading text-2xl leading-snug">{current.prompt}</p>
           {revealed ? (
-            <div className="mt-6 border-t-2 border-border pt-4 animate-[fadeUp_200ms_ease-out]">
+            <div className="mt-6 border-t-2 border-border pt-4 animate-[fadeUp_150ms_ease-out]">
               <p className="font-heading text-sm uppercase">Resposta</p>
               <p className="mt-1 text-lg">{current.answer}</p>
               {choices.length > 0 ? (

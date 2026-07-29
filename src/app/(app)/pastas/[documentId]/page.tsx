@@ -12,10 +12,19 @@ type Document = {
   content_text: string;
 };
 
+type LinkedForm = {
+  formId: string;
+  title: string;
+  isStale: boolean;
+};
+
 export default function DocumentPage() {
   const params = useParams<{ documentId: string }>();
   const [document, setDocument] = useState<Document | null>(null);
-  const [isStale, setIsStale] = useState(false);
+  const [linkedForms, setLinkedForms] = useState<LinkedForm[]>([]);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">(
+    "saved",
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,14 +39,21 @@ export default function DocumentPage() {
         const formsRes = await fetch("/api/forms");
         const formsJson = await formsRes.json();
         if (formsRes.ok) {
-          const stale = (formsJson.data.forms as Array<{
-            source_document_id: string;
-            is_stale: boolean;
-          }>).some(
-            (f) =>
-              f.source_document_id === params.documentId && f.is_stale,
-          );
-          setIsStale(stale);
+          const linked = (
+            formsJson.data.forms as Array<{
+              id: string;
+              title: string;
+              source_document_id: string;
+              is_stale: boolean;
+            }>
+          )
+            .filter((f) => f.source_document_id === params.documentId)
+            .map((f) => ({
+              formId: f.id,
+              title: f.title,
+              isStale: f.is_stale,
+            }));
+          setLinkedForms(linked);
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Falha");
@@ -59,20 +75,35 @@ export default function DocumentPage() {
   return (
     <DocumentEditor
       document={document}
-      isStale={isStale}
+      saveStatus={saveStatus}
+      linkedForms={linkedForms}
+      isStale={linkedForms.some((f) => f.isStale)}
       onChange={async ({ content, contentText, title }) => {
-        const res = await fetch(`/api/documents/${document.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, contentText, title }),
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          toast.error(json.error?.message ?? "Falha ao salvar");
-          return;
+        setSaveStatus("saving");
+        try {
+          const res = await fetch(`/api/documents/${document.id}/content`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content, contentText }),
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            setSaveStatus("error");
+            toast.error(json.error?.message ?? "Falha ao salvar");
+            return;
+          }
+          if (title && title !== document.title) {
+            await fetch(`/api/documents/${document.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title }),
+            });
+          }
+          setDocument(json.data.document);
+          setSaveStatus("saved");
+        } catch {
+          setSaveStatus("error");
         }
-        setDocument(json.data.document);
-        toast.success("Documento salvo");
       }}
     />
   );

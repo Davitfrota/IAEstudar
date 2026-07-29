@@ -79,4 +79,43 @@ export class ScheduleRepository {
     if (error) throw error;
     return (data ?? []) as ScheduleItem[];
   }
+
+  async getItemOwned(
+    userId: string,
+    itemId: string,
+  ): Promise<ScheduleItem | null> {
+    const { data, error } = await this.db
+      .from("schedule_items")
+      .select("*")
+      .eq("id", itemId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data as ScheduleItem | null;
+  }
+
+  async updateItem(
+    userId: string,
+    itemId: string,
+    patch: { scheduledDate?: string; status?: string },
+  ): Promise<ScheduleItem> {
+    const update: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (patch.scheduledDate !== undefined) {
+      update.scheduled_date = patch.scheduledDate;
+    }
+    if (patch.status !== undefined) update.status = patch.status;
+
+    const { data, error } = await this.db
+      .from("schedule_items")
+      .update(update)
+      .eq("id", itemId)
+      .eq("user_id", userId)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return data as ScheduleItem;
+  }
 }

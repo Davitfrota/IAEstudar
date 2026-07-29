@@ -32,16 +32,17 @@ pnpm dev
 
 Rotas: `/sign-in`, `/sign-up`, `/pastas`, `/agenda`, `/formularios`, `/agente`.
 
-## Fase 2 (UX + E2E do agente)
+## Fase 2 (UX do agente + interface real)
 
-- Tool MCP `update_document` (com confirmação se sobrescrever)
-- Botão **Confirmar** no chat para schedule/form/update
-- Realtime na agenda, formulários e árvore de pastas
-- Atalhos na prática: Espaço (revelar), 1–4 (Again/Hard/Good/Easy)
-- `PATCH /api/folders/[id]` e `confirmed` em `POST /api/schedules`
-- Preview de `generate_form` com **estimativa de cards/créditos/custo** + **edição campo a campo** (roadmap RemNote)
+- Plano consolidado (`ToolPlanCard`) com TTL 10 min + confirm/cancel
+- Preview editável de cards + estimativa de custo
+- Calendário com drag & drop (`PATCH /api/schedule-items`)
+- Fila de prática via `GET /api/practice/queue` + `practice_sessions`
+- Autosave BlockNote (`PATCH /api/documents/:id/content`, debounce 2s)
+- Atalhos na prática: Espaço / 1–4
 
 ## Specs
 
 - [Fase 1](docs/study-platform-fase1-spec.md)
+- [Fase 2](docs/study-platform-fase2-spec.md)
 - [RemNote — análise e roadmap](docs/remnote-analise-roadmap.md)

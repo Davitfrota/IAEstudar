@@ -74,4 +74,18 @@ export class ScheduleService {
       items,
     };
   }
+
+  async updateItem(
+    userId: string,
+    itemId: string,
+    patch: { scheduledDate?: string; status?: "pending" | "done" | "skipped" },
+  ) {
+    const repo = await this.repo();
+    const existing = await repo.getItemOwned(userId, itemId);
+    if (!existing) {
+      throw new AppError("Sessão não encontrada", 404, "SCHEDULE_ITEM_NOT_FOUND");
+    }
+    // Nunca altera fsrs_due — schedule_item ≠ memória FSRS
+    return repo.updateItem(userId, itemId, patch);
+  }
 }

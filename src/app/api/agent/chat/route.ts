@@ -20,12 +20,13 @@ export async function POST(request: Request) {
             userId: user.id,
             message: body.message,
             conversationId: body.conversationId,
-            confirmTool: body.confirmTool,
           })) {
             if (event.type === "textDelta") {
               send({ textDelta: event.textDelta });
             } else if (event.type === "toolCall") {
               send({ toolCall: event.toolCall });
+            } else if (event.type === "toolPlan") {
+              send({ toolPlan: event.toolPlan });
             } else if (event.type === "conversation") {
               send({ conversationId: event.conversationId });
             } else if (event.type === "error") {

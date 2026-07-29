@@ -8,6 +8,7 @@ import "@blocknote/core/fonts/inter.css";
 import "@mantine/core/styles.css";
 import "@blocknote/mantine/style.css";
 import type { Block } from "@blocknote/core";
+import { Badge } from "@/components/ui/badge";
 
 type Document = {
   id: string;
@@ -16,13 +17,21 @@ type Document = {
   content_text: string;
 };
 
+type LinkedForm = {
+  formId: string;
+  title: string;
+  isStale: boolean;
+};
+
 type Props = {
   document: Document;
   onChange: (payload: {
     content: unknown;
     contentText: string;
     title?: string;
-  }) => void;
+  }) => void | Promise<void>;
+  saveStatus?: "saved" | "saving" | "error";
+  linkedForms?: LinkedForm[];
   isStale?: boolean;
 };
 
@@ -32,7 +41,13 @@ function blocksFromDocument(content: unknown): Block[] | undefined {
     : undefined;
 }
 
-function EditorBody({ document, onChange, isStale }: Props) {
+function EditorBody({
+  document,
+  onChange,
+  saveStatus = "saved",
+  linkedForms = [],
+  isStale,
+}: Props) {
   const [title, setTitle] = useState(document.title);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef(document);
@@ -53,21 +68,35 @@ function EditorBody({ document, onChange, isStale }: Props) {
   }) => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      onChange({
+      void onChange({
         content: payload.content ?? latest.current.content,
         contentText: payload.contentText ?? latest.current.content_text,
         title: payload.title ?? title,
       });
-    }, 700);
+    }, 2000);
   };
+
+  const staleForms = linkedForms.filter((f) => f.isStale);
 
   return (
     <div className="flex h-full min-h-[60vh] flex-col gap-3">
-      {isStale ? (
-        <div className="rounded-base border-2 border-border bg-[var(--chart-3)] px-3 py-2 text-sm font-heading">
-          Formulários gerados a partir deste documento estão desatualizados
-          (is_stale). Regeneração só sob pedido.
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {isStale || staleForms.length > 0 ? (
+          <Badge variant="pink">Formulário desatualizado</Badge>
+        ) : null}
+        <span className="text-xs font-heading uppercase opacity-70">
+          {saveStatus === "saving"
+            ? "Salvando…"
+            : saveStatus === "error"
+              ? "Erro ao salvar"
+              : "Salvo"}
+        </span>
+      </div>
+      {staleForms.length > 0 ? (
+        <p className="text-sm opacity-80">
+          {staleForms.map((f) => f.title).join(", ")} — regeneração só sob
+          pedido.
+        </p>
       ) : null}
       <input
         value={title}

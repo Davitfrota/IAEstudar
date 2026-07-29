@@ -11,6 +11,7 @@ export async function POST(request: Request) {
       user.id,
       body.formQuestionId,
       body.rating,
+      body.sessionId,
     );
     return ok(result);
   } catch (error) {

@@ -48,6 +48,34 @@ export default function AgendaPage() {
     },
   });
 
+  const patchItem = async (
+    itemId: string,
+    body: { scheduledDate?: string; status?: string },
+  ) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === itemId
+          ? {
+              ...it,
+              scheduled_date: body.scheduledDate ?? it.scheduled_date,
+              status: body.status ?? it.status,
+            }
+          : it,
+      ),
+    );
+    const res = await fetch(`/api/schedule-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      toast.error("Falha ao atualizar sessão");
+      void load();
+      return;
+    }
+    toast.success("Agenda atualizada");
+  };
+
   const chartData = (() => {
     const counts = new Map<string, number>();
     for (const item of items) {
@@ -68,7 +96,7 @@ export default function AgendaPage() {
         <div>
           <h1 className="font-heading text-3xl uppercase">Agenda</h1>
           <p className="text-sm opacity-80">
-            Atualiza em tempo real quando o agente cria sessões.
+            Arraste sessões entre dias — não altera o FSRS dos cards.
           </p>
         </div>
         <div className="hidden gap-2 md:flex">
@@ -113,6 +141,12 @@ export default function AgendaPage() {
               toast.message(item.topic ?? "Sessão", {
                 description: `${item.scheduled_date} · ${item.duration_minutes} min`,
               })
+            }
+            onReschedule={(itemId, newDate) =>
+              void patchItem(itemId, { scheduledDate: newDate })
+            }
+            onToggleStatus={(itemId, status) =>
+              void patchItem(itemId, { status })
             }
           />
         </>

@@ -4,16 +4,24 @@ import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { assertAgentChatRateLimit } from "@/server/rate-limit";
 import { executeMcpTool, openaiTools } from "@/server/mcp/tools";
+import { FormService } from "@/server/services/form-service";
+import {
+  PLANABLE_TOOLS,
+  createPendingPlan,
+  describeToolStep,
+  summarizePlan,
+  toToolPlanPreview,
+  type ToolPlanPreview,
+} from "@/server/pending-plans";
 
 const SYSTEM_PROMPT = `Você é o agente de estudo da plataforma IA Estudar.
 Ajuda o usuário a organizar pastas, documentos, cronogramas e formulários de prática.
 
 Regras:
 - Use as ferramentas MCP disponíveis; nunca invente IDs.
-- Nunca sobrescreva conteúdo existente sem confirmação explícita do usuário.
-- Fluxo ideal numa única tarefa: create_folder → create_document (com initialContent ≥50 chars) → generate_schedule (confirmed=false depois true) → generate_form (confirmed=false depois true).
-- Se o documento nascer vazio, use update_document com contentText antes de generate_form.
-- Para generate_schedule, generate_form e update_document (quando há conteúdo): primeiro confirmed=false, explique o preview; só persista com confirmed=true após o usuário confirmar (a UI também pode confirmar).
+- Para criar conteúdo (create_folder, create_document, update_document, generate_schedule, generate_form), chame TODAS as ferramentas necessárias na mesma resposta — o sistema agrupa num plano único para o usuário confirmar uma vez.
+- Não peça confirmed=true você mesmo; a UI confirma o plano.
+- Prefira create_document com initialContent ≥50 chars se for gerar formulário em seguida.
 - Se faltar contexto (tópicos, documento vazio, data), peça — não invente.
 - Responda em português brasileiro, de forma direta.
 - userId já está no contexto autenticado; nunca peça nem aceite userId do usuário.`;
@@ -30,22 +38,17 @@ type StreamEvent =
         error?: string;
       };
     }
+  | { type: "toolPlan"; toolPlan: ToolPlanPreview }
   | { type: "conversation"; conversationId: string }
   | { type: "done" }
   | { type: "error"; message: string };
 
 type ChatMessage = OpenAI.Chat.ChatCompletionMessageParam;
 
-type ConfirmTool = {
-  name: "generate_schedule" | "generate_form" | "update_document";
-  input: Record<string, unknown>;
-};
-
 export async function* runAgentChat(opts: {
   userId: string;
-  message?: string;
+  message: string;
   conversationId?: string;
-  confirmTool?: ConfirmTool;
 }): AsyncGenerator<StreamEvent> {
   assertAgentChatRateLimit(opts.userId);
 
@@ -84,66 +87,7 @@ export async function* runAgentChat(opts: {
 
   yield { type: "conversation", conversationId };
 
-  if (opts.confirmTool) {
-    const confirmedInput = { ...opts.confirmTool.input, confirmed: true };
-    const userLine = `Confirmei a ferramenta ${opts.confirmTool.name}.`;
-
-    await db.from("conversation_messages").insert({
-      conversation_id: conversationId,
-      user_id: opts.userId,
-      role: "user",
-      content: userLine,
-    });
-
-    const result = await executeMcpTool(
-      { userId: opts.userId },
-      opts.confirmTool.name,
-      confirmedInput,
-    );
-
-    const status =
-      result.status === "pending_confirmation"
-        ? "pending_confirmation"
-        : result.status === "error"
-          ? "error"
-          : "executed";
-
-    yield {
-      type: "toolCall",
-      toolCall: {
-        name: opts.confirmTool.name,
-        input: confirmedInput,
-        status,
-        result: result.data,
-        error: result.error,
-      },
-    };
-
-    const summary =
-      status === "executed"
-        ? `Pronto — ${opts.confirmTool.name} executada com sucesso.`
-        : status === "error"
-          ? `Não consegui confirmar: ${result.error ?? "erro"}`
-          : "Ainda preciso de confirmação.";
-
-    yield { type: "textDelta", textDelta: summary };
-
-    await db.from("conversation_messages").insert({
-      conversation_id: conversationId,
-      user_id: opts.userId,
-      role: "assistant",
-      content: summary,
-    });
-
-    yield { type: "done" };
-    return;
-  }
-
-  const message = opts.message?.trim() ?? "";
-  if (!message) {
-    throw new AppError("Mensagem vazia", 400, "EMPTY_MESSAGE");
-  }
-
+  const message = opts.message.trim();
   await db.from("conversation_messages").insert({
     conversation_id: conversationId,
     user_id: opts.userId,
@@ -153,7 +97,7 @@ export async function* runAgentChat(opts: {
 
   const { data: history } = await db
     .from("conversation_messages")
-    .select("role, content, tool_calls")
+    .select("role, content")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .limit(40);
@@ -197,13 +141,11 @@ export async function* runAgentChat(opts: {
     for await (const chunk of stream) {
       const choice = chunk.choices[0];
       if (!choice) continue;
-
       const delta = choice.delta;
       if (delta.content) {
         assistantText += delta.content;
         yield { type: "textDelta", textDelta: delta.content };
       }
-
       if (delta.tool_calls) {
         for (const part of delta.tool_calls) {
           const existing = toolCallsByIndex.get(part.index) ?? {
@@ -226,9 +168,20 @@ export async function* runAgentChat(opts: {
       .map(([, call]) => call)
       .filter((call) => call.name);
 
-    if (toolCalls.length === 0) {
-      break;
-    }
+    if (toolCalls.length === 0) break;
+
+    const parsedCalls = toolCalls.map((call) => {
+      let input: Record<string, unknown> = {};
+      try {
+        input = JSON.parse(call.arguments || "{}") as Record<string, unknown>;
+      } catch {
+        input = {};
+      }
+      return { ...call, input };
+    });
+
+    const planable = parsedCalls.filter((c) => PLANABLE_TOOLS.has(c.name));
+    const immediate = parsedCalls.filter((c) => !PLANABLE_TOOLS.has(c.name));
 
     messages.push({
       role: "assistant",
@@ -243,38 +196,24 @@ export async function* runAgentChat(opts: {
       })),
     });
 
-    let hasPending = false;
-
-    for (const call of toolCalls) {
-      let parsedInput: unknown = {};
-      try {
-        parsedInput = JSON.parse(call.arguments || "{}");
-      } catch {
-        parsedInput = {};
-      }
-
+    for (const call of immediate) {
       const result = await executeMcpTool(
         { userId: opts.userId },
         call.name,
-        parsedInput,
+        call.input,
       );
-
       const status =
-        result.status === "pending_confirmation"
-          ? "pending_confirmation"
-          : result.status === "error"
-            ? "error"
+        result.status === "error"
+          ? "error"
+          : result.status === "pending_confirmation"
+            ? "pending_confirmation"
             : "executed";
-
-      if (status === "pending_confirmation") {
-        hasPending = true;
-      }
 
       yield {
         type: "toolCall",
         toolCall: {
           name: call.name,
-          input: parsedInput,
+          input: call.input,
           status,
           result: result.data,
           error: result.error,
@@ -288,24 +227,107 @@ export async function* runAgentChat(opts: {
       });
     }
 
-    if (hasPending) {
-      const follow = await client.chat.completions.create({
-        model,
-        max_tokens: 1024,
-        messages,
-        tools,
-        stream: true,
-      });
+    if (planable.length > 0) {
+      let estimatedCost: ToolPlanPreview["estimatedCost"];
+      let draftQuestions: ToolPlanPreview["draftQuestions"];
 
-      for await (const chunk of follow) {
-        const text = chunk.choices[0]?.delta?.content;
-        if (text) {
-          assistantText += text;
-          yield { type: "textDelta", textDelta: text };
+      const steps = [];
+      for (const call of planable) {
+        const input = { ...call.input };
+        // Preview de form: gera rascunho agora (custa rate limit / IA), persistência só no confirm
+        if (call.name === "generate_form") {
+          try {
+            const preview = await new FormService().previewGenerate(
+              opts.userId,
+              {
+                sourceDocumentId: String(input.sourceDocumentId),
+                type: input.type as "flashcard_deck" | "quiz" | "open_form",
+                instruction: String(input.instruction ?? ""),
+                questionCount: Number(input.questionCount ?? 10),
+                confirmed: false,
+              },
+            );
+            draftQuestions = preview.preview.questions;
+            estimatedCost = preview.preview.estimate;
+            input.questions = draftQuestions;
+          } catch (error) {
+            const msg =
+              error instanceof Error ? error.message : "Falha no preview";
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: JSON.stringify({ status: "error", error: msg }),
+            });
+            yield {
+              type: "toolCall",
+              toolCall: {
+                name: call.name,
+                input,
+                status: "error",
+                error: msg,
+              },
+            };
+            continue;
+          }
+        }
+
+        steps.push({
+          tool: call.name,
+          description: describeToolStep(call.name, input),
+          input,
+        });
+
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify({
+            status: "pending_confirmation",
+            message: "Aguardando confirmação do plano consolidado na UI",
+          }),
+        });
+      }
+
+      if (steps.length > 0) {
+        const plan = createPendingPlan({
+          userId: opts.userId,
+          summary: summarizePlan(steps),
+          steps,
+          estimatedCost,
+          draftQuestions,
+        });
+
+        yield {
+          type: "toolPlan",
+          toolPlan: toToolPlanPreview(plan, "awaiting_confirmation"),
+        };
+
+        const follow = await client.chat.completions.create({
+          model,
+          max_tokens: 512,
+          messages: [
+            ...messages,
+            {
+              role: "user",
+              content:
+                "Explique em 2–3 frases o plano proposto e peça para o usuário confirmar ou pedir ajustes na UI.",
+            },
+          ],
+          stream: true,
+        });
+
+        for await (const chunk of follow) {
+          const text = chunk.choices[0]?.delta?.content;
+          if (text) {
+            assistantText += text;
+            yield { type: "textDelta", textDelta: text };
+          }
         }
       }
+
       break;
     }
+
+    if (immediate.length === 0) break;
   }
 
   await db.from("conversation_messages").insert({

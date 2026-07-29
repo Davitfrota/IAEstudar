@@ -85,6 +85,27 @@ export const fsrsRatingSchema = z.enum(["again", "hard", "good", "easy"]);
 export const recordReviewSchema = z.object({
   formQuestionId: z.string().uuid(),
   rating: fsrsRatingSchema,
+  sessionId: z.string().uuid().optional(),
+});
+
+export const updateScheduleItemSchema = z.object({
+  scheduledDate: z.string().date().optional(),
+  status: z.enum(["pending", "done", "skipped"]).optional(),
+});
+
+export const practiceQueueQuerySchema = z.object({
+  formId: z.string().uuid().optional(),
+  date: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});
+
+export const documentContentSchema = z.object({
+  content: z.unknown(),
+  contentText: z.string().optional(),
+});
+
+export const updatePlanDraftSchema = z.object({
+  draftQuestions: z.array(generatedQuestionSchema).min(1).max(50).optional(),
 });
 
 export const listDueSchema = z.object({
@@ -92,25 +113,10 @@ export const listDueSchema = z.object({
   folderId: z.string().uuid().optional(),
 });
 
-export const agentChatSchema = z
-  .object({
-    message: z.string().trim().min(1).max(8000).optional(),
-    conversationId: z.string().uuid().optional(),
-    confirmTool: z
-      .object({
-        name: z.enum(["generate_schedule", "generate_form", "update_document"]),
-        input: z.record(z.string(), z.unknown()),
-      })
-      .optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (!data.message && !data.confirmTool) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Informe message ou confirmTool",
-      });
-    }
-  });
+export const agentChatSchema = z.object({
+  message: z.string().trim().min(1).max(8000),
+  conversationId: z.string().uuid().optional(),
+});
 
 export const paginationSchema = z.object({
   cursor: z.string().uuid().optional(),
@@ -129,3 +135,4 @@ export type ListDueInput = z.infer<typeof listDueSchema>;
 export type AgentChatInput = z.infer<typeof agentChatSchema>;
 export type FsrsRating = z.infer<typeof fsrsRatingSchema>;
 export type FormType = z.infer<typeof formTypeSchema>;
+export type UpdateScheduleItemInput = z.infer<typeof updateScheduleItemSchema>;

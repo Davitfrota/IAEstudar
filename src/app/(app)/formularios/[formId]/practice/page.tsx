@@ -18,16 +18,22 @@ type Question = {
 export default function PracticePage() {
   const params = useParams<{ formId: string }>();
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [totalDue, setTotalDue] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/forms/${params.formId}`);
+        const res = await fetch(
+          `/api/practice/queue?formId=${params.formId}&limit=20`,
+        );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error?.message ?? "Erro");
         setQuestions(json.data.questions);
+        setSessionId(json.data.sessionId);
+        setTotalDue(json.data.totalDue);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Falha");
       } finally {
@@ -42,7 +48,7 @@ export default function PracticePage() {
       const res = await fetch("/api/forms/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formQuestionId: questionId, rating }),
+        body: JSON.stringify({ formQuestionId: questionId, rating, sessionId }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error?.message ?? "Falha ao registrar");
@@ -74,7 +80,12 @@ export default function PracticePage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-heading text-3xl uppercase">Prática</h1>
+      <div>
+        <h1 className="font-heading text-3xl uppercase">Prática</h1>
+        <p className="text-sm opacity-80">
+          Sessão limitada a {questions.length} de {totalDue} due
+        </p>
+      </div>
       <PracticeQueue
         formId={params.formId}
         questions={questions}
