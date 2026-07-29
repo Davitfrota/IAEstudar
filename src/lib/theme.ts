@@ -1,4 +1,4 @@
-export const THEMES = ["neo", "clay", "glass"] as const;
+export const THEMES = ["neo", "clay", "glass", "material", "fluent"] as const;
 
 export type ThemeId = (typeof THEMES)[number];
 
@@ -20,10 +20,24 @@ export const THEME_META: Record<
     label: "Glass",
     badgeClass: "bg-mint text-foreground",
   },
+  material: {
+    label: "Material",
+    badgeClass: "bg-lavender text-foreground",
+  },
+  fluent: {
+    label: "Fluent",
+    badgeClass: "bg-butter text-foreground",
+  },
 };
 
 export function isThemeId(value: unknown): value is ThemeId {
-  return value === "neo" || value === "clay" || value === "glass";
+  return (
+    value === "neo" ||
+    value === "clay" ||
+    value === "glass" ||
+    value === "material" ||
+    value === "fluent"
+  );
 }
 
 export function nextTheme(current: ThemeId): ThemeId {

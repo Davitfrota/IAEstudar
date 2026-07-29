@@ -22,14 +22,17 @@ import {
 } from "@/server/schemas";
 
 describe("theme", () => {
-  it("cycles neo → clay → glass → neo", () => {
+  it("cycles neo → clay → glass → material → fluent → neo", () => {
     expect(nextTheme("neo")).toBe("clay");
     expect(nextTheme("clay")).toBe("glass");
-    expect(nextTheme("glass")).toBe("neo");
-    expect(THEMES).toHaveLength(3);
-    expect(isThemeId("neo")).toBe(true);
+    expect(nextTheme("glass")).toBe("material");
+    expect(nextTheme("material")).toBe("fluent");
+    expect(nextTheme("fluent")).toBe("neo");
+    expect(THEMES).toHaveLength(5);
+    expect(isThemeId("material")).toBe(true);
+    expect(isThemeId("fluent")).toBe(true);
     expect(isThemeId("y2k")).toBe(false);
-    expect(THEME_META.clay.label).toBe("Clay");
+    expect(THEME_META.fluent.label).toBe("Fluent");
   });
 });
 

@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
-const themeBootScript = `(function(){try{var k='ia-estudar-theme';var t=localStorage.getItem(k);if(t!=='neo'&&t!=='clay'&&t!=='glass')t='neo';var r=document.documentElement;r.classList.remove('theme-neo','theme-clay','theme-glass');r.classList.add('theme-'+t);r.dataset.theme=t;}catch(e){document.documentElement.classList.add('theme-neo');document.documentElement.dataset.theme='neo';}})();`;
+const themeBootScript = `(function(){try{var k='ia-estudar-theme';var ok=['neo','clay','glass','material','fluent'];var t=localStorage.getItem(k);if(ok.indexOf(t)<0)t='neo';var r=document.documentElement;r.classList.remove('theme-neo','theme-clay','theme-glass','theme-material','theme-fluent');r.classList.add('theme-'+t);r.dataset.theme=t;}catch(e){document.documentElement.classList.add('theme-neo');document.documentElement.dataset.theme='neo';}})();`;
 
 const heading = Archivo_Black({
   variable: "--font-heading",

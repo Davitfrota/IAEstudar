@@ -362,3 +362,176 @@
   box-shadow: 4px 4px 0 #000 !important;
   border-radius: 5px !important;
 }
+
+/* ===== Material Design (Google) ===== */
+.theme-material {
+  color-scheme: light;
+  --background: #fef7ff;
+  --secondary-background: #ffffff;
+  --foreground: #1d1b20;
+  --main-foreground: #ffffff;
+  --main: #6750a4;
+  --border: #cac4d0;
+  --ring: #6750a4;
+  --overlay: rgb(29 27 32 / 0.4);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+
+  --lavender: #e8def8;
+  --baby-blue: #d3e4fd;
+  --peach: #ffd8e4;
+  --pink: #f9dedc;
+  --butter: #fef7ff;
+  --mint: #d0e8d0;
+
+  --chart-1: #6750a4;
+  --chart-2: #b3261e;
+  --chart-3: #7d5260;
+  --chart-4: #386a20;
+  --chart-5: #4a5f7a;
+  --chart-active-dot: #6750a4;
+
+  --spacing-boxShadowX: 0px;
+  --spacing-boxShadowY: 0px;
+  --spacing-reverseBoxShadowX: 0px;
+  --spacing-reverseBoxShadowY: 0px;
+  --radius-base: 16px;
+  --shadow-shadow: var(--shadow);
+}
+
+.theme-material body {
+  background: var(--background);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.theme-material header.sticky {
+  background: color-mix(in srgb, var(--secondary-background) 92%, var(--lavender));
+  border-color: transparent;
+  border-bottom-width: 1px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+.theme-material [data-slot="card"],
+.theme-material .theme-surface {
+  background: var(--secondary-background);
+  border-color: transparent;
+  border-width: 0;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.3),
+    0 2px 6px 2px rgb(0 0 0 / 0.15);
+}
+
+.theme-material button,
+.theme-material a.rounded-base {
+  border-width: 0;
+  border-radius: 999px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  transition:
+    box-shadow 180ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 180ms cubic-bezier(0.2, 0, 0, 1),
+    transform 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.theme-material button:active,
+.theme-material a.rounded-base:active {
+  transform: scale(0.98);
+}
+
+.theme-material .theme-toast {
+  border: none !important;
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.3),
+    0 4px 8px 3px rgb(0 0 0 / 0.15) !important;
+  border-radius: 12px !important;
+  background: #313033 !important;
+  color: #f5eff7 !important;
+}
+
+/* ===== Fluent Design (Microsoft) ===== */
+.theme-fluent {
+  color-scheme: light;
+  --background: #f3f3f3;
+  --secondary-background: rgb(255 255 255 / 0.7);
+  --foreground: #1a1a1a;
+  --main-foreground: #ffffff;
+  --main: #0078d4;
+  --border: rgb(0 0 0 / 0.08);
+  --ring: #0078d4;
+  --overlay: rgb(0 0 0 / 0.35);
+  --shadow: 0 2px 4px rgb(0 0 0 / 0.04), 0 8px 16px rgb(0 0 0 / 0.06);
+
+  --lavender: #e0d6f5;
+  --baby-blue: #cce4f7;
+  --peach: #fde7d4;
+  --pink: #f9d4d8;
+  --butter: #fff4ce;
+  --mint: #d1f0d5;
+
+  --chart-1: #0078d4;
+  --chart-2: #d13438;
+  --chart-3: #8764b8;
+  --chart-4: #107c10;
+  --chart-5: #00b7c3;
+  --chart-active-dot: #0078d4;
+
+  --fluent-acrylic: rgb(255 255 255 / 0.65);
+  --fluent-stroke: rgb(255 255 255 / 0.55);
+
+  --spacing-boxShadowX: 0px;
+  --spacing-boxShadowY: 0px;
+  --spacing-reverseBoxShadowX: 0px;
+  --spacing-reverseBoxShadowY: 0px;
+  --radius-base: 8px;
+  --shadow-shadow: var(--shadow);
+}
+
+.theme-fluent body {
+  background:
+    linear-gradient(160deg, #e8f4fc 0%, #f3f3f3 40%, #faf6ff 100%);
+  background-attachment: fixed;
+}
+
+.theme-fluent header.sticky {
+  background: color-mix(in srgb, var(--fluent-acrylic) 80%, #e8f4fc);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border-color: var(--fluent-stroke);
+  border-bottom-width: 1px;
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.04);
+}
+
+.theme-fluent [data-slot="card"],
+.theme-fluent .theme-surface {
+  background: var(--fluent-acrylic);
+  backdrop-filter: blur(20px) saturate(120%);
+  -webkit-backdrop-filter: blur(20px) saturate(120%);
+  border-color: var(--border);
+  border-width: 1px;
+  box-shadow: var(--shadow);
+}
+
+.theme-fluent button,
+.theme-fluent a.rounded-base {
+  border-width: 1px;
+  border-radius: 4px;
+  box-shadow: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.theme-fluent button:hover,
+.theme-fluent a.rounded-base:hover {
+  filter: brightness(1.03);
+}
+
+.theme-fluent .theme-toast {
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow) !important;
+  border-radius: 8px !important;
+  background: rgb(255 255 255 / 0.85) !important;
+  color: var(--foreground) !important;
+  backdrop-filter: blur(20px);
+}
