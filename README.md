@@ -32,6 +32,20 @@ pnpm dev
 
 Rotas: `/sign-in`, `/sign-up`, `/pastas`, `/agenda`, `/formularios`, `/agente`.
 
+## Testes e prontidão
+
+```bash
+pnpm test              # unit + integration (com .env.local)
+pnpm test:load         # smoke de carga no rate limit
+pnpm test:security     # RLS / pending_agent_plans
+pnpm test:e2e          # Playwright smoke (sobe pnpm dev)
+pnpm test:all          # unit + load + security
+```
+
+Diagnóstico ao vivo: `GET /api/health` (Supabase, Groq, planos, Redis, Realtime).
+
+E2E autenticado (opcional): `E2E_EMAIL` / `E2E_PASSWORD`.
+
 ## Fase 2 (UX do agente + interface real)
 
 - Plano consolidado (`ToolPlanCard`) com TTL 10 min + confirm/cancel

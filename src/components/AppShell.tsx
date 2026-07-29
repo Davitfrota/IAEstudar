@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -57,9 +57,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <Badge variant="blue" className="hidden md:inline-flex">
-            Neo
-          </Badge>
+          <ThemeSwitcher />
           <Button variant="neutral" size="sm" onClick={() => void signOut()}>
             Sair
           </Button>

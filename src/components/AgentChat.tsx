@@ -195,7 +195,11 @@ export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
               ...plan,
               steps: plan.steps.map((s) =>
                 s.id === event.stepProgress!.stepId
-                  ? { ...s, status: event.stepProgress!.status }
+                  ? {
+                      ...s,
+                      status: event.stepProgress!.status,
+                      error: event.stepProgress!.error,
+                    }
                   : s,
               ),
             };

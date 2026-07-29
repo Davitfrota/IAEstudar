@@ -68,8 +68,65 @@ async function withAudit(
 
 export const mcpToolDefinitions = [
   {
+    name: "propose_study_plan",
+    description:
+      "PREFIRA esta tool quando o usuário pedir setup completo de estudo. Cria pasta do tema + resumo geral + arquivos por tópico OU por dia + cronograma (todos os dias até a data) + flashcards opcionais. Uma única chamada.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        folderName: { type: "string" },
+        documentTitle: { type: "string" },
+        documentContent: {
+          type: "string",
+          description: "Resumo de estudo com ≥50 caracteres",
+        },
+        scheduleTitle: { type: "string" },
+        topics: { type: "array", items: { type: "string" } },
+        targetDate: {
+          type: "string",
+          description: "YYYY-MM-DD futuro (ex.: 2026-08-15)",
+        },
+        dailyMinutes: { type: "number" },
+        includeForm: { type: "boolean" },
+        formType: {
+          type: "string",
+          enum: ["flashcard_deck", "quiz", "open_form"],
+        },
+        formInstruction: { type: "string" },
+        questionCount: { type: "number" },
+        organizationMode: {
+          type: "string",
+          enum: ["by_topic", "by_day"],
+          description:
+            "by_topic = um arquivo por tópico; by_day = um arquivo por dia de estudo. Default by_topic.",
+        },
+        lessonNotes: {
+          type: "array",
+          description:
+            "Conteúdo de cada arquivo extra (além do resumo). Em by_topic: um por tópico. Em by_day: um por dia.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              content: { type: "string" },
+            },
+            required: ["title", "content"],
+          },
+        },
+      },
+      required: [
+        "folderName",
+        "documentTitle",
+        "documentContent",
+        "scheduleTitle",
+        "topics",
+      ],
+    },
+  },
+  {
     name: "create_folder",
-    description: "Cria uma pasta de estudo para o usuário autenticado.",
+    description:
+      "Cria só uma pasta. Para setup completo (pasta+doc+agenda+cards), use propose_study_plan.",
     inputSchema: {
       type: "object",
       properties: {
@@ -82,7 +139,7 @@ export const mcpToolDefinitions = [
   {
     name: "create_document",
     description:
-      "Cria um documento (anotações) opcionalmente dentro de uma pasta. Prefira já incluir initialContent com o texto de estudo (≥50 chars) se for gerar formulário em seguida.",
+      "Cria só um documento. Para setup completo, use propose_study_plan.",
     inputSchema: {
       type: "object",
       properties: {
@@ -112,7 +169,7 @@ export const mcpToolDefinitions = [
   {
     name: "generate_schedule",
     description:
-      "Gera um cronograma distribuindo tópicos entre hoje e targetDate (ou 14 dias). Requer confirmação do usuário antes de persistir se confirmed=false.",
+      "Gera só um cronograma. Para setup completo, use propose_study_plan. Requer confirmed=false até a UI confirmar.",
     inputSchema: {
       type: "object",
       properties: {
@@ -128,7 +185,7 @@ export const mcpToolDefinitions = [
   {
     name: "generate_form",
     description:
-      "Gera formulário (flashcard_deck|quiz|open_form) a partir de um documento. Documento precisa ter content_text ≥50 chars. Exige confirmed=true para persistir.",
+      "Gera só um formulário a partir de documento existente. Para setup novo completo, use propose_study_plan.",
     inputSchema: {
       type: "object",
       properties: {
@@ -177,6 +234,13 @@ const generateScheduleWithConfirmSchema = generateScheduleSchema.and(
 );
 
 const handlers: Record<string, ToolHandler> = {
+  propose_study_plan: async (_ctx, raw) => ({
+    status: "pending_confirmation",
+    data: {
+      message: "Plano consolidado aguardando confirmação na UI",
+      draft: raw,
+    },
+  }),
   create_folder: async (ctx, raw) =>
     withAudit(ctx, "create_folder", raw, async () => {
       const input = createFolderSchema.parse(raw);

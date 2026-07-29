@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { Archivo_Black, Space_Grotesk } from "next/font/google";
 import { Toaster } from "sonner";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
+
+const themeBootScript = `(function(){try{var k='ia-estudar-theme';var t=localStorage.getItem(k);if(t!=='neo'&&t!=='clay'&&t!=='glass')t='neo';var r=document.documentElement;r.classList.remove('theme-neo','theme-clay','theme-glass');r.classList.add('theme-'+t);r.dataset.theme=t;}catch(e){document.documentElement.classList.add('theme-neo');document.documentElement.dataset.theme='neo';}})();`;
 
 const heading = Archivo_Black({
   variable: "--font-heading",
@@ -28,17 +31,23 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${heading.variable} ${sans.variable} h-full`}
+      className={`${heading.variable} ${sans.variable} theme-neo h-full`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body className="min-h-full flex flex-col">
-        {children}
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            className:
-              "!border-2 !border-black !shadow-[4px_4px_0_#000] !rounded-[5px] !font-semibold",
-          }}
-        />
+        <ThemeProvider>
+          {children}
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              className:
+                "theme-toast !font-semibold",
+            }}
+          />
+        </ThemeProvider>
       </body>
     </html>
   );

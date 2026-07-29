@@ -6,7 +6,7 @@ import { assertExportRateLimit } from "@/server/rate-limit";
 export async function GET() {
   try {
     const user = await requireAppUser();
-    assertExportRateLimit(user.id);
+    await assertExportRateLimit(user.id);
 
     const db = await createDbClient();
     const [

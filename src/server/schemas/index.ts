@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeFutureDate } from "@/server/date-utils";
 
 export const nameSchema = z.string().trim().min(1).max(200);
 
@@ -36,27 +37,15 @@ export const updateFolderSchema = z.object({
   position: z.number().int().min(0).optional(),
 });
 
-export const generateScheduleSchema = z
-  .object({
-    title: nameSchema,
-    topics: z.array(z.string().trim().min(1)).min(1),
-    targetDate: z.string().date().optional(),
-    dailyMinutes: z.number().int().min(15).max(480).optional().default(30),
-  })
-  .superRefine((data, ctx) => {
-    if (data.targetDate) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const target = new Date(`${data.targetDate}T00:00:00`);
-      if (target < today) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["targetDate"],
-          message: "target_date não pode estar no passado",
-        });
-      }
-    }
-  });
+export const generateScheduleSchema = z.object({
+  title: nameSchema,
+  topics: z.array(z.string().trim().min(1)).min(1),
+  targetDate: z.preprocess((value) => {
+    if (typeof value !== "string" || !value.trim()) return undefined;
+    return normalizeFutureDate(value.trim());
+  }, z.string().date().optional()),
+  dailyMinutes: z.coerce.number().int().min(15).max(480).optional().default(30),
+});
 
 export const generateScheduleApiSchema = generateScheduleSchema.and(
   z.object({ confirmed: z.boolean().optional().default(false) }),

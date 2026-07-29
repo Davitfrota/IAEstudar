@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
 import { createGroqClient, groqModel } from "@/lib/ai/groq";
+import { groqToolCompletion } from "@/lib/ai/groq-tools";
 import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { assertAgentChatRateLimit } from "@/server/rate-limit";
@@ -8,7 +9,7 @@ import { FormService } from "@/server/services/form-service";
 import {
   PLANABLE_TOOLS,
   createPendingPlan,
-  describeToolStep,
+  expandToPlanSteps,
   summarizePlan,
   toToolPlanPreview,
   type ToolPlanPreview,
@@ -19,10 +20,18 @@ Ajuda o usuário a organizar pastas, documentos, cronogramas e formulários de p
 
 Regras:
 - Use as ferramentas MCP disponíveis; nunca invente IDs.
-- Para criar conteúdo (create_folder, create_document, update_document, generate_schedule, generate_form), chame TODAS as ferramentas necessárias na mesma resposta — o sistema agrupa num plano único para o usuário confirmar uma vez.
+- Se o usuário pedir setup completo (pasta + documento + cronograma e/ou flashcards), chame UMA ÚNICA ferramenta: propose_study_plan — não chame create_folder/create_document/generate_* em paralelo.
+- Estrutura da pasta em propose_study_plan:
+  1) Pasta com o nome do tema
+  2) documentTitle/documentContent = RESUMO do tema inteiro (≥50 chars, conteúdo útil)
+  3) organizationMode: "by_topic" (default — um arquivo por tópico) OU "by_day" (um arquivo por dia até targetDate) conforme o usuário pedir
+  4) lessonNotes: preencha título+conteúdo (≥50 chars cada) para cada arquivo extra — não deixe vazio genérico
+  5) Cronograma até targetDate cobrindo TODOS os dias (o sistema preenche o intervalo)
+  6) Flashcards a partir do resumo, se pedido
+- Cronograma bem feito: topics claros e progressivos (ex.: limites → derivadas → regra da cadeia → revisão); dailyMinutes realista (25–60); targetDate YYYY-MM-DD futuro (ano corrente se omitido).
+- Para ações pontuais (só pasta, só doc, só agenda, só form em doc existente), use a tool correspondente.
 - Não peça confirmed=true você mesmo; a UI confirma o plano.
-- Prefira create_document com initialContent ≥50 chars se for gerar formulário em seguida.
-- Se faltar contexto (tópicos, documento vazio, data), peça — não invente.
+- Se faltar contexto, peça — não invente.
 - Responda em português brasileiro, de forma direta.
 - userId já está no contexto autenticado; nunca peça nem aceite userId do usuário.`;
 
@@ -50,7 +59,7 @@ export async function* runAgentChat(opts: {
   message: string;
   conversationId?: string;
 }): AsyncGenerator<StreamEvent> {
-  assertAgentChatRateLimit(opts.userId);
+  await assertAgentChatRateLimit(opts.userId);
 
   if (!process.env.GROQ_API_KEY) {
     throw new AppError(
@@ -125,67 +134,45 @@ export async function* runAgentChat(opts: {
   while (turns < 6) {
     turns += 1;
 
-    const stream = await client.chat.completions.create({
-      model,
-      max_tokens: 4096,
-      messages,
-      tools,
-      stream: true,
-    });
+    let content = "";
+    let toolCalls: Awaited<
+      ReturnType<typeof groqToolCompletion>
+    >["toolCalls"] = [];
 
-    const toolCallsByIndex = new Map<
-      number,
-      { id: string; name: string; arguments: string }
-    >();
-
-    for await (const chunk of stream) {
-      const choice = chunk.choices[0];
-      if (!choice) continue;
-      const delta = choice.delta;
-      if (delta.content) {
-        assistantText += delta.content;
-        yield { type: "textDelta", textDelta: delta.content };
-      }
-      if (delta.tool_calls) {
-        for (const part of delta.tool_calls) {
-          const existing = toolCallsByIndex.get(part.index) ?? {
-            id: "",
-            name: "",
-            arguments: "",
-          };
-          if (part.id) existing.id = part.id;
-          if (part.function?.name) existing.name = part.function.name;
-          if (part.function?.arguments) {
-            existing.arguments += part.function.arguments;
-          }
-          toolCallsByIndex.set(part.index, existing);
-        }
-      }
+    try {
+      const result = await groqToolCompletion({
+        client,
+        model,
+        messages,
+        tools,
+      });
+      content = result.content;
+      toolCalls = result.toolCalls;
+    } catch (error) {
+      const msg =
+        error instanceof AppError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : "Falha no Groq";
+      yield { type: "error", message: msg };
+      assistantText += msg;
+      break;
     }
 
-    const toolCalls = [...toolCallsByIndex.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, call]) => call)
-      .filter((call) => call.name);
+    if (content) {
+      assistantText += content;
+      yield { type: "textDelta", textDelta: content };
+    }
 
     if (toolCalls.length === 0) break;
 
-    const parsedCalls = toolCalls.map((call) => {
-      let input: Record<string, unknown> = {};
-      try {
-        input = JSON.parse(call.arguments || "{}") as Record<string, unknown>;
-      } catch {
-        input = {};
-      }
-      return { ...call, input };
-    });
-
-    const planable = parsedCalls.filter((c) => PLANABLE_TOOLS.has(c.name));
-    const immediate = parsedCalls.filter((c) => !PLANABLE_TOOLS.has(c.name));
+    const planable = toolCalls.filter((c) => PLANABLE_TOOLS.has(c.name));
+    const immediate = toolCalls.filter((c) => !PLANABLE_TOOLS.has(c.name));
 
     messages.push({
       role: "assistant",
-      content: null,
+      content: content || null,
       tool_calls: toolCalls.map((call) => ({
         id: call.id,
         type: "function" as const,
@@ -230,52 +217,40 @@ export async function* runAgentChat(opts: {
     if (planable.length > 0) {
       let estimatedCost: ToolPlanPreview["estimatedCost"];
       let draftQuestions: ToolPlanPreview["draftQuestions"];
+      const steps: {
+        tool: string;
+        description: string;
+        input: Record<string, unknown>;
+      }[] = [];
 
-      const steps = [];
       for (const call of planable) {
-        const input = { ...call.input };
-        // Preview de form: gera rascunho agora (custa rate limit / IA), persistência só no confirm
-        if (call.name === "generate_form") {
-          try {
-            const preview = await new FormService().previewGenerate(
-              opts.userId,
-              {
-                sourceDocumentId: String(input.sourceDocumentId),
-                type: input.type as "flashcard_deck" | "quiz" | "open_form",
-                instruction: String(input.instruction ?? ""),
-                questionCount: Number(input.questionCount ?? 10),
-                confirmed: false,
-              },
-            );
-            draftQuestions = preview.preview.questions;
-            estimatedCost = preview.preview.estimate;
-            input.questions = draftQuestions;
-          } catch (error) {
-            const msg =
-              error instanceof Error ? error.message : "Falha no preview";
-            messages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              content: JSON.stringify({ status: "error", error: msg }),
-            });
-            yield {
-              type: "toolCall",
-              toolCall: {
-                name: call.name,
-                input,
-                status: "error",
-                error: msg,
-              },
-            };
-            continue;
-          }
-        }
+        const expanded = expandToPlanSteps(call.name, call.input);
 
-        steps.push({
-          tool: call.name,
-          description: describeToolStep(call.name, input),
-          input,
-        });
+        for (const step of expanded) {
+          if (step.tool === "generate_form" && !step.input._deferredPreview) {
+            try {
+              const preview = await new FormService().previewGenerate(
+                opts.userId,
+                {
+                  sourceDocumentId: String(step.input.sourceDocumentId),
+                  type: step.input.type as
+                    | "flashcard_deck"
+                    | "quiz"
+                    | "open_form",
+                  instruction: String(step.input.instruction ?? ""),
+                  questionCount: Number(step.input.questionCount ?? 10),
+                  confirmed: false,
+                },
+              );
+              draftQuestions = preview.preview.questions;
+              estimatedCost = preview.preview.estimate;
+              step.input.questions = draftQuestions;
+            } catch {
+              step.input._deferredPreview = true;
+            }
+          }
+          steps.push(step);
+        }
 
         messages.push({
           role: "tool",
@@ -283,6 +258,7 @@ export async function* runAgentChat(opts: {
           content: JSON.stringify({
             status: "pending_confirmation",
             message: "Aguardando confirmação do plano consolidado na UI",
+            steps: steps.map((s) => s.tool),
           }),
         });
       }
@@ -304,6 +280,7 @@ export async function* runAgentChat(opts: {
         const follow = await client.chat.completions.create({
           model,
           max_tokens: 512,
+          temperature: 0.3,
           messages: [
             ...messages,
             {

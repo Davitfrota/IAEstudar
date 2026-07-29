@@ -162,3 +162,203 @@
     @apply font-heading;
   }
 }
+
+/* ===== Claymorphism (design-system) ===== */
+.theme-clay {
+  color-scheme: light;
+  --background: #f6efe4;
+  --secondary-background: #fff8f0;
+  --foreground: #4a3428;
+  --main-foreground: #fff8f0;
+  --main: #e8925a;
+  --border: #e2d2c0;
+  --ring: #e8925a;
+  --overlay: rgb(74 52 40 / 0.45);
+  --shadow: 10px 14px 28px -8px rgb(120 80 50 / 0.28);
+
+  --lavender: #d8c4f0;
+  --baby-blue: #b8dff0;
+  --peach: #e8925a;
+  --pink: #f0a8a4;
+  --butter: #fff1c9;
+  --mint: #9edcc8;
+
+  --chart-1: #e8925a;
+  --chart-2: #f0a8a4;
+  --chart-3: #d8c4f0;
+  --chart-4: #9edcc8;
+  --chart-5: #b8dff0;
+  --chart-active-dot: #4a3428;
+
+  --clay-light: rgb(255 255 255 / 0.9);
+  --clay-dark: rgb(120 80 50 / 0.28);
+
+  --spacing-boxShadowX: 0px;
+  --spacing-boxShadowY: 0px;
+  --spacing-reverseBoxShadowX: 0px;
+  --spacing-reverseBoxShadowY: 0px;
+  --radius-base: 1.5rem;
+  --shadow-shadow: var(--shadow);
+}
+
+.theme-clay body {
+  background:
+    radial-gradient(ellipse at 20% 0%, #ffe8c8 0%, transparent 50%),
+    radial-gradient(ellipse at 90% 10%, #d8f0ea 0%, transparent 45%),
+    var(--background);
+}
+
+.theme-clay header.sticky {
+  background: color-mix(in srgb, var(--secondary-background) 88%, white);
+  border-color: var(--border);
+  backdrop-filter: blur(8px);
+}
+
+.theme-clay [data-slot="card"],
+.theme-clay .theme-surface {
+  background: var(--secondary-background);
+  border-color: transparent;
+  box-shadow:
+    10px 14px 28px -8px var(--clay-dark),
+    inset 4px 4px 8px 0 var(--clay-light),
+    inset -6px -8px 14px 0 var(--clay-dark);
+}
+
+.theme-clay button,
+.theme-clay a.rounded-base,
+.theme-clay [class*="border-2"] {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.theme-clay .theme-toast {
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow) !important;
+  border-radius: 1rem !important;
+  background: var(--secondary-background) !important;
+  color: var(--foreground) !important;
+}
+
+/* ===== Glassmorphism (design-system) ===== */
+.theme-glass {
+  color-scheme: dark;
+  --background: #0f1a2e;
+  --secondary-background: rgb(180 220 255 / 0.12);
+  --foreground: #f4f8ff;
+  --main-foreground: #0f1a2e;
+  --main: #5eead4;
+  --border: rgb(255 255 255 / 0.28);
+  --ring: #5eead4;
+  --overlay: rgb(0 0 0 / 0.65);
+  --shadow: 0 12px 40px -10px rgb(0 0 0 / 0.45);
+
+  --lavender: rgb(200 180 255 / 0.55);
+  --baby-blue: rgb(140 200 255 / 0.45);
+  --peach: rgb(255 180 140 / 0.55);
+  --pink: rgb(255 150 170 / 0.5);
+  --butter: rgb(255 230 150 / 0.35);
+  --mint: rgb(94 234 212 / 0.45);
+
+  --chart-1: #5eead4;
+  --chart-2: #fb7185;
+  --chart-3: #c4b5fd;
+  --chart-4: #86efac;
+  --chart-5: #7dd3fc;
+  --chart-active-dot: #fff;
+
+  --glass-tint: #dcecff;
+  --glass-edge: #ffffff;
+
+  --spacing-boxShadowX: 0px;
+  --spacing-boxShadowY: 0px;
+  --spacing-reverseBoxShadowX: 0px;
+  --spacing-reverseBoxShadowY: 0px;
+  --radius-base: 1rem;
+  --shadow-shadow: var(--shadow);
+}
+
+.theme-glass body {
+  background:
+    radial-gradient(ellipse at 15% 10%, #1d4ed8 0%, transparent 45%),
+    radial-gradient(ellipse at 85% 0%, #0f766e 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 100%, #7c3aed 0%, transparent 50%),
+    var(--background);
+  background-attachment: fixed;
+}
+
+.theme-glass header.sticky {
+  background: color-mix(in oklab, var(--glass-tint) 14%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border-color: color-mix(in oklab, var(--glass-edge) 35%, transparent);
+}
+
+.theme-glass [data-slot="card"],
+.theme-glass .theme-surface {
+  background: color-mix(in oklab, var(--glass-tint) 14%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border-color: color-mix(in oklab, var(--glass-edge) 40%, transparent);
+  box-shadow:
+    0 8px 32px -8px rgb(0 0 0 / 0.35),
+    inset 0 1px 0 0 color-mix(in oklab, var(--glass-edge) 50%, transparent);
+}
+
+.theme-glass button,
+.theme-glass a.rounded-base {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.theme-glass .theme-toast {
+  border: 1px solid color-mix(in oklab, var(--glass-edge) 40%, transparent) !important;
+  box-shadow: var(--shadow) !important;
+  border-radius: 1rem !important;
+  background: color-mix(in oklab, var(--glass-tint) 18%, transparent) !important;
+  color: var(--foreground) !important;
+  backdrop-filter: blur(16px);
+}
+
+/* Clay / glass utility surfaces (from design-system) */
+@layer components {
+  .clay {
+    background: var(--secondary-background);
+    box-shadow:
+      10px 14px 28px -8px var(--clay-dark, rgb(120 80 50 / 0.28)),
+      inset 4px 4px 8px 0 var(--clay-light, rgb(255 255 255 / 0.9)),
+      inset -6px -8px 14px 0 var(--clay-dark, rgb(120 80 50 / 0.28));
+  }
+
+  .clay-tint {
+    box-shadow:
+      8px 12px 24px -8px var(--clay-dark, rgb(120 80 50 / 0.28)),
+      inset 4px 4px 8px 0 rgb(255 255 255 / 0.35),
+      inset -5px -7px 12px 0 rgb(80 50 30 / 0.28);
+  }
+
+  .glass {
+    background: color-mix(in oklab, var(--glass-tint, #dcecff) 12%, transparent);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    border: 1px solid color-mix(in oklab, var(--glass-edge, #fff) 45%, transparent);
+    box-shadow:
+      0 8px 32px -8px rgb(0 0 0 / 0.35),
+      inset 0 1px 0 0 color-mix(in oklab, var(--glass-edge, #fff) 55%, transparent);
+  }
+
+  .glass-strong {
+    background: color-mix(in oklab, var(--glass-tint, #dcecff) 22%, transparent);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid color-mix(in oklab, var(--glass-edge, #fff) 55%, transparent);
+    box-shadow:
+      0 12px 40px -10px rgb(0 0 0 / 0.45),
+      inset 0 1px 0 0 color-mix(in oklab, var(--glass-edge, #fff) 65%, transparent);
+  }
+}
+
+/* Neo toast (default) */
+.theme-neo .theme-toast {
+  border: 2px solid #000 !important;
+  box-shadow: 4px 4px 0 #000 !important;
+  border-radius: 5px !important;
+}

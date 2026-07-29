@@ -173,7 +173,7 @@ export class FormService {
   }
 
   async previewGenerate(userId: string, input: GenerateFormInput) {
-    assertGenerateRateLimit(userId, "generate_form");
+    await assertGenerateRateLimit(userId, "generate_form");
 
     const doc = await (await this.documents()).getOwned(
       userId,
@@ -222,7 +222,7 @@ export class FormService {
   async generate(userId: string, input: GenerateFormInput) {
     // Se já veio do preview editado, não cobra rate limit de novo nem regenera.
     if (!input.questions?.length) {
-      assertGenerateRateLimit(userId, "generate_form");
+      await assertGenerateRateLimit(userId, "generate_form");
     }
 
     const doc = await (await this.documents()).getOwned(

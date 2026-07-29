@@ -66,6 +66,9 @@ export async function POST(request: Request, { params }: Params) {
         });
 
         let failed = false;
+        let lastFolderId: string | undefined;
+        let lastDocumentId: string | undefined;
+        let firstDocumentId: string | undefined;
 
         for (const step of plan!.steps) {
           step.status = "running";
@@ -84,19 +87,27 @@ export async function POST(request: Request, { params }: Params) {
             step: progressRunning,
           });
 
-          const input =
-            step.tool === "generate_schedule" ||
+          const input: Record<string, unknown> = {
+            ...(step.tool === "generate_schedule" ||
             step.tool === "generate_form" ||
             step.tool === "update_document"
               ? { ...step.input, confirmed: true }
-              : step.input;
+              : step.input),
+          };
 
-          if (
-            step.tool === "generate_form" &&
-            plan!.draftQuestions?.length &&
-            !input.questions
-          ) {
-            input.questions = plan!.draftQuestions;
+          if (step.tool === "create_document" && lastFolderId) {
+            input.folderId = lastFolderId;
+          }
+          if (step.tool === "generate_form") {
+            // Flashcards a partir do resumo (primeiro doc), não do último arquivo do dia
+            const sourceId = firstDocumentId ?? lastDocumentId;
+            if (sourceId) {
+              input.sourceDocumentId = sourceId;
+            }
+            if (plan!.draftQuestions?.length && !input.questions) {
+              input.questions = plan!.draftQuestions;
+            }
+            delete input._deferredPreview;
           }
 
           const result = await executeMcpTool(
@@ -127,6 +138,15 @@ export async function POST(request: Request, { params }: Params) {
 
           step.status = "done";
           step.result = result.data;
+          const data = result.data as Record<string, unknown> | undefined;
+          if (step.tool === "create_folder" && data?.folderId) {
+            lastFolderId = String(data.folderId);
+          }
+          if (step.tool === "create_document" && data?.documentId) {
+            lastDocumentId = String(data.documentId);
+            firstDocumentId ??= lastDocumentId;
+          }
+
           const progressDone = {
             stepId: step.id,
             tool: step.tool,

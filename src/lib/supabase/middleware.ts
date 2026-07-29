@@ -35,14 +35,17 @@ export async function updateSession(request: NextRequest) {
   const user = data.user;
 
   const pathname = request.nextUrl.pathname;
+  const isApi = pathname.startsWith("/api/");
   const isPublic =
     pathname === "/" ||
     pathname.startsWith("/sign-in") ||
     pathname.startsWith("/sign-up") ||
     pathname.startsWith("/auth/") ||
-    pathname.startsWith("/api/auth/");
+    pathname.startsWith("/api/auth/") ||
+    pathname === "/api/health";
 
-  if (!user && !isPublic) {
+  // Páginas: redirect para sign-in. APIs: deixam a rota responder 401 JSON.
+  if (!user && !isPublic && !isApi) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/sign-in";
     redirectUrl.searchParams.set("next", pathname);

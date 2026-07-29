@@ -17,6 +17,7 @@ export type ToolPlanPreview = {
     tool: string;
     description: string;
     status: "pending" | "running" | "done" | "error";
+    error?: string;
   }[];
   estimatedCost?: FormEstimate & { questionCount?: number; note?: string };
   draftQuestions?: PreviewQuestion[];
@@ -73,23 +74,28 @@ function PlanBody({
 
       <ul className="space-y-1 text-sm" aria-live="polite">
         {plan.steps.map((step) => (
-          <li key={step.id} className="flex items-start gap-2">
-            <span className="font-heading uppercase" aria-hidden>
-              {step.status === "done"
-                ? "✓"
-                : step.status === "running"
-                  ? "…"
-                  : step.status === "error"
-                    ? "!"
-                    : "○"}
-            </span>
-            <span
-              className={
-                step.status === "done" ? "line-through opacity-70" : undefined
-              }
-            >
-              {step.description}
-            </span>
+          <li key={step.id} className="flex flex-col gap-0.5">
+            <div className="flex items-start gap-2">
+              <span className="font-heading uppercase" aria-hidden>
+                {step.status === "done"
+                  ? "✓"
+                  : step.status === "running"
+                    ? "…"
+                    : step.status === "error"
+                      ? "!"
+                      : "○"}
+              </span>
+              <span
+                className={
+                  step.status === "done" ? "line-through opacity-70" : undefined
+                }
+              >
+                {step.description}
+              </span>
+            </div>
+            {step.status === "error" && step.error ? (
+              <p className="ml-5 text-xs text-pink">{step.error}</p>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -248,7 +254,9 @@ export function ToolPlanCard({
           ...prev,
           status: prev.status === "awaiting_confirmation" ? "executing" : prev.status,
           steps: prev.steps.map((s) =>
-            s.id === step.stepId ? { ...s, status: step.status } : s,
+            s.id === step.stepId
+              ? { ...s, status: step.status, error: step.error }
+              : s,
           ),
         };
         onPlanChange?.(next);

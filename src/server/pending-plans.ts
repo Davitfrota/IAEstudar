@@ -1,5 +1,7 @@
 import { nanoid } from "nanoid";
 import { createDbClient } from "@/lib/supabase/admin";
+import { getRedis } from "@/server/redis";
+import { normalizeFutureDate } from "@/server/date-utils";
 
 export type PlanStepStatus = "pending" | "running" | "done" | "error";
 
@@ -23,10 +25,11 @@ export type ToolPlanPreview = {
   planId: string;
   summary: string;
   steps: {
+    id: string;
     tool: string;
     description: string;
-    id: string;
     status: PlanStepStatus;
+    error?: string;
   }[];
   estimatedCost?: {
     questionCount?: number;
@@ -65,51 +68,27 @@ function pruneMemory() {
 }
 
 async function redisGetSet() {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (url && token) {
-    const { Redis } = await import("@upstash/redis");
-    return new Redis({ url, token });
-  }
-
-  const redisUrl = process.env.REDIS_URL;
-  if (redisUrl) {
-    const Redis = (await import("ioredis")).default;
-    const client = new Redis(redisUrl, {
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
-    if (client.status === "wait") {
-      await client.connect().catch(() => undefined);
-    }
-    return {
-      async get(key: string) {
-        const v = await client.get(key);
-        return v ? (JSON.parse(v) as PendingPlan) : null;
-      },
-      async set(key: string, value: PendingPlan, opts?: { ex?: number }) {
-        const payload = JSON.stringify(value);
-        if (opts?.ex) await client.set(key, payload, "EX", opts.ex);
-        else await client.set(key, payload);
-      },
-      async del(key: string) {
-        await client.del(key);
-      },
-    };
-  }
-
-  return null;
+  return getRedis();
 }
 
-async function pgSave(plan: PendingPlan) {
-  const db = await createDbClient();
-  await db.from("pending_agent_plans").upsert({
-    plan_id: plan.planId,
-    user_id: plan.userId,
-    payload: plan,
-    expires_at: new Date(plan.expiresAt).toISOString(),
-    created_at: new Date(plan.createdAt).toISOString(),
-  });
+async function pgSave(plan: PendingPlan): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const db = await createDbClient();
+    const { error } = await db.from("pending_agent_plans").upsert({
+      plan_id: plan.planId,
+      user_id: plan.userId,
+      payload: plan,
+      expires_at: new Date(plan.expiresAt).toISOString(),
+      created_at: new Date(plan.createdAt).toISOString(),
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "pgSave failed",
+    };
+  }
 }
 
 async function pgGet(planId: string): Promise<PendingPlan | null> {
@@ -134,8 +113,12 @@ async function pgGet(planId: string): Promise<PendingPlan | null> {
 }
 
 async function pgDelete(planId: string) {
-  const db = await createDbClient();
-  await db.from("pending_agent_plans").delete().eq("plan_id", planId);
+  try {
+    const db = await createDbClient();
+    await db.from("pending_agent_plans").delete().eq("plan_id", planId);
+  } catch {
+    // ignore
+  }
 }
 
 export async function createPendingPlan(input: {
@@ -161,18 +144,24 @@ export async function createPendingPlan(input: {
     expiresAt: now + TTL_MS,
   };
 
+  // L1 sempre (mesmo processo / HMR parcial)
+  pruneMemory();
+  memory.set(plan.planId, plan);
+
   const redis = await redisGetSet();
   if (redis) {
-    await redis.set(`${REDIS_PREFIX}${plan.planId}`, plan, {
-      ex: Math.ceil(TTL_MS / 1000),
-    });
+    try {
+      await redis.set(`${REDIS_PREFIX}${plan.planId}`, plan, {
+        ex: Math.ceil(TTL_MS / 1000),
+      });
+    } catch {
+      // ignore
+    }
   }
 
-  try {
-    await pgSave(plan);
-  } catch {
-    pruneMemory();
-    memory.set(plan.planId, plan);
+  const saved = await pgSave(plan);
+  if (!saved.ok) {
+    console.warn("[pending-plans] pgSave falhou, usando memória/Redis:", saved.error);
   }
 
   return plan;
@@ -215,17 +204,18 @@ export async function updatePendingPlan(
   const plan = await getPendingPlan(planId);
   if (!plan) return null;
   Object.assign(plan, patch);
+  memory.set(planId, plan);
 
   const redis = await redisGetSet();
   const ttlSec = Math.max(1, Math.ceil((plan.expiresAt - Date.now()) / 1000));
   if (redis) {
-    await redis.set(`${REDIS_PREFIX}${planId}`, plan, { ex: ttlSec });
+    try {
+      await redis.set(`${REDIS_PREFIX}${planId}`, plan, { ex: ttlSec });
+    } catch {
+      // ignore
+    }
   }
-  try {
-    await pgSave(plan);
-  } catch {
-    memory.set(planId, plan);
-  }
+  await pgSave(plan);
   return plan;
 }
 
@@ -253,6 +243,7 @@ export function toToolPlanPreview(
       tool: s.tool,
       description: s.description,
       status: s.status,
+      error: s.error,
     })),
     estimatedCost: plan.estimatedCost,
     draftQuestions: plan.draftQuestions,
@@ -262,6 +253,7 @@ export function toToolPlanPreview(
 }
 
 export const PLANABLE_TOOLS = new Set([
+  "propose_study_plan",
   "create_folder",
   "create_document",
   "update_document",
@@ -274,6 +266,8 @@ export function describeToolStep(
   input: Record<string, unknown>,
 ): string {
   switch (tool) {
+    case "propose_study_plan":
+      return `Plano de estudo “${String(input.folderName ?? "")}”`;
     case "create_folder":
       return `Criar pasta “${String(input.name ?? "")}”`;
     case "create_document":
@@ -287,6 +281,181 @@ export function describeToolStep(
     default:
       return tool;
   }
+}
+
+/** Expande propose_study_plan em steps reais do plano. */
+export function expandToPlanSteps(
+  tool: string,
+  input: Record<string, unknown>,
+): { tool: string; description: string; input: Record<string, unknown> }[] {
+  if (tool !== "propose_study_plan") {
+    return [
+      {
+        tool,
+        description: describeToolStep(tool, input),
+        input,
+      },
+    ];
+  }
+
+  const folderName = String(input.folderName ?? "Estudos");
+  const summaryTitle = String(
+    input.documentTitle ?? `Resumo — ${folderName}`,
+  );
+  const documentContent = String(input.documentContent ?? "");
+  const scheduleTitle = String(input.scheduleTitle ?? `Estudo ${folderName}`);
+  const topics = Array.isArray(input.topics)
+    ? input.topics.map(String).filter(Boolean)
+    : [];
+  const includeForm = input.includeForm !== false;
+  const formType = String(input.formType ?? "flashcard_deck");
+  const formInstruction = String(
+    input.formInstruction ??
+      `Flashcards sobre: ${topics.join(", ") || folderName}`,
+  );
+  const questionCount = Number(input.questionCount ?? 8);
+  const organizationMode =
+    input.organizationMode === "by_day" ? "by_day" : "by_topic";
+
+  const lessonNotes = Array.isArray(input.lessonNotes)
+    ? (input.lessonNotes as { title?: string; content?: string }[])
+        .map((n) => ({
+          title: String(n.title ?? "").trim(),
+          content: String(n.content ?? "").trim(),
+        }))
+        .filter((n) => n.title)
+    : [];
+
+  const ensureContent = (text: string, fallback: string) => {
+    const body = text.length >= 50 ? text : `${text}\n\n${fallback}`.trim();
+    return body.length >= 50 ? body : `${fallback} `.repeat(3).slice(0, 120);
+  };
+
+  const steps: {
+    tool: string;
+    description: string;
+    input: Record<string, unknown>;
+  }[] = [
+    {
+      tool: "create_folder",
+      description: describeToolStep("create_folder", { name: folderName }),
+      input: { name: folderName },
+    },
+    {
+      tool: "create_document",
+      description: describeToolStep("create_document", {
+        title: summaryTitle,
+      }),
+      input: {
+        title: summaryTitle.startsWith("Resumo")
+          ? summaryTitle
+          : `Resumo — ${summaryTitle}`,
+        initialContent: ensureContent(
+          documentContent,
+          `Visão geral de ${folderName}. Tópicos: ${topics.join(", ")}.`,
+        ),
+      },
+    },
+  ];
+
+  // Arquivos extras: por tema ou por dia
+  const MAX_LESSON_DOCS = 21;
+  if (organizationMode === "by_topic") {
+    const notes =
+      lessonNotes.length > 0
+        ? lessonNotes.slice(0, MAX_LESSON_DOCS)
+        : topics.slice(0, MAX_LESSON_DOCS).map((t) => ({
+            title: t,
+            content: `Estudo focado em ${t} (tema ${folderName}). Conceitos-chave, exemplos e pontos de atenção.`,
+          }));
+    for (const note of notes) {
+      steps.push({
+        tool: "create_document",
+        description: describeToolStep("create_document", {
+          title: note.title,
+        }),
+        input: {
+          title: note.title,
+          initialContent: ensureContent(
+            note.content,
+            `Material do tópico ${note.title}.`,
+          ),
+        },
+      });
+    }
+  } else {
+    // by_day: um arquivo por dia até targetDate (cap)
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = input.targetDate
+      ? new Date(
+          `${normalizeFutureDate(String(input.targetDate))}T00:00:00`,
+        )
+      : new Date(start.getTime() + 13 * 86400000);
+    const dayCount = Math.max(
+      1,
+      Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
+    );
+    const n = Math.min(dayCount, MAX_LESSON_DOCS);
+
+    for (let i = 0; i < n; i++) {
+      const topic = topics[i % Math.max(topics.length, 1)] ?? folderName;
+      const provided = lessonNotes[i];
+      const date = new Date(start.getTime() + i * 86400000);
+      const iso = date.toISOString().slice(0, 10);
+      const title =
+        provided?.title ||
+        `Dia ${i + 1} (${iso}) — ${topic}`;
+      const content =
+        provided?.content ||
+        `Plano do dia ${i + 1} (${iso}): estudar ${topic}. Objetivos, exercícios e revisão rápida.`;
+      steps.push({
+        tool: "create_document",
+        description: describeToolStep("create_document", { title }),
+        input: {
+          title,
+          initialContent: ensureContent(content, `Sessão do dia ${i + 1}.`),
+        },
+      });
+    }
+  }
+
+  steps.push({
+    tool: "generate_schedule",
+    description: describeToolStep("generate_schedule", {
+      title: scheduleTitle,
+      topics,
+    }),
+    input: {
+      title: scheduleTitle,
+      topics: topics.length ? topics : [folderName],
+      targetDate: input.targetDate
+        ? normalizeFutureDate(String(input.targetDate))
+        : input.targetDate,
+      dailyMinutes: input.dailyMinutes ?? 30,
+      confirmed: false,
+    },
+  });
+
+  if (includeForm) {
+    steps.push({
+      tool: "generate_form",
+      description: describeToolStep("generate_form", {
+        type: formType,
+        questionCount,
+      }),
+      input: {
+        sourceDocumentId: "00000000-0000-4000-8000-000000000000",
+        type: formType,
+        instruction: formInstruction,
+        questionCount,
+        confirmed: false,
+        _deferredPreview: true,
+      },
+    });
+  }
+
+  return steps;
 }
 
 export function summarizePlan(steps: { tool: string }[]): string {

@@ -23,11 +23,12 @@ export class ScheduleService {
   }
 
   /**
-   * Distribui 1 tópico por dia. Se não couber no intervalo, inclui o que cabe
-   * e retorna topicsSkipped — não comprime sessões inviáveis.
+   * Preenche TODOS os dias de hoje até targetDate (ou 14 dias).
+   * Tópicos ciclam / repetem com rótulo de sessão quando há mais dias que tópicos.
+   * Se há mais tópicos que dias, agrupa tópicos extras no mesmo dia.
    */
   async generate(userId: string, input: GenerateScheduleInput) {
-    assertGenerateRateLimit(userId, "generate_schedule");
+    await assertGenerateRateLimit(userId, "generate_schedule");
 
     const start = parseISO(todayIsoDate());
     const end = input.targetDate
@@ -35,15 +36,41 @@ export class ScheduleService {
       : addDays(start, 13);
 
     const dayCount = Math.max(1, differenceInCalendarDays(end, start) + 1);
-    const topicsFitting = input.topics.slice(0, dayCount);
-    const topicsSkipped = input.topics.slice(dayCount);
+    const topics = input.topics.map((t) => t.trim()).filter(Boolean);
+    if (topics.length === 0) {
+      throw new AppError("Informe ao menos 1 tópico", 400, "INSUFFICIENT_TOPICS");
+    }
 
-    if (topicsFitting.length === 0) {
-      throw new AppError(
-        "Sem tópicos suficientes para o intervalo pedido — envie mais contexto",
-        400,
-        "INSUFFICIENT_TOPICS",
-      );
+    const sessions: { date: string; topic: string; position: number }[] = [];
+
+    if (topics.length <= dayCount) {
+      for (let i = 0; i < dayCount; i++) {
+        const base = topics[i % topics.length]!;
+        const round = Math.floor(i / topics.length) + 1;
+        const rounds = Math.ceil(dayCount / topics.length);
+        const topic =
+          rounds > 1
+            ? `${base} — sessão ${round}/${rounds}`
+            : base;
+        sessions.push({
+          date: formatISO(addDays(start, i), { representation: "date" }),
+          topic,
+          position: i,
+        });
+      }
+    } else {
+      // Mais tópicos que dias: agrupa no dia
+      for (let i = 0; i < dayCount; i++) {
+        const chunk: string[] = [];
+        for (let t = i; t < topics.length; t += dayCount) {
+          chunk.push(topics[t]!);
+        }
+        sessions.push({
+          date: formatISO(addDays(start, i), { representation: "date" }),
+          topic: chunk.join(" · "),
+          position: i,
+        });
+      }
     }
 
     const repo = await this.repo();
@@ -55,22 +82,22 @@ export class ScheduleService {
 
     const duration = input.dailyMinutes ?? 30;
     const items = await repo.createItems(
-      topicsFitting.map((topic, index) => ({
+      sessions.map((s) => ({
         schedule_id: schedule.id,
         user_id: userId,
-        scheduled_date: formatISO(addDays(start, index), {
-          representation: "date",
-        }),
+        scheduled_date: s.date,
         duration_minutes: duration,
-        topic,
-        position: index,
+        topic: s.topic,
+        position: s.position,
       })),
     );
 
     return {
       scheduleId: schedule.id,
       itemsCreated: items.length,
-      topicsSkipped,
+      dayCount,
+      topicsUsed: topics.length,
+      topicsSkipped: [] as string[],
       items,
     };
   }

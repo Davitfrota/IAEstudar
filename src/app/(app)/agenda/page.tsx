@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
 import {
   ScheduleCalendar,
+  type CalendarView,
   type ScheduleItem,
 } from "@/components/ScheduleCalendar";
 import { Button } from "@/components/ui/button";
@@ -14,15 +15,18 @@ import { useRealtimeRefresh } from "@/hooks/useRealtimeRefresh";
 export default function AgendaPage() {
   const [items, setItems] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"week" | "month">("week");
+  const [view, setView] = useState<CalendarView>("month");
+  const [cursor, setCursor] = useState(() => new Date());
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
-    const apply = () => setView(mq.matches ? "month" : "week");
+    const apply = () => {
+      if (mq.matches && view === "week") setView("month");
+    };
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
-  }, []);
+  }, [view]);
 
   const load = useCallback(async () => {
     try {
@@ -83,12 +87,18 @@ export default function AgendaPage() {
     }
     return [...counts.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .slice(0, 7)
+      .slice(0, 14)
       .map(([label, value]) => ({
         label: label.slice(5),
         value,
       }));
   })();
+
+  const views: { id: CalendarView; label: string }[] = [
+    { id: "week", label: "Semana" },
+    { id: "month", label: "Mês" },
+    { id: "year", label: "Ano" },
+  ];
 
   return (
     <div className="space-y-4">
@@ -99,21 +109,18 @@ export default function AgendaPage() {
             Arraste sessões entre dias — não altera o FSRS dos cards.
           </p>
         </div>
-        <div className="hidden gap-2 md:flex">
-          <Button
-            variant={view === "week" ? "default" : "neutral"}
-            size="sm"
-            onClick={() => setView("week")}
-          >
-            Semana
-          </Button>
-          <Button
-            variant={view === "month" ? "default" : "neutral"}
-            size="sm"
-            onClick={() => setView("month")}
-          >
-            Lista
-          </Button>
+        <div className="flex flex-wrap gap-2">
+          {views.map((v) => (
+            <Button
+              key={v.id}
+              variant={view === v.id ? "default" : "neutral"}
+              size="sm"
+              className={v.id === "week" ? "hidden md:inline-flex" : undefined}
+              onClick={() => setView(v.id)}
+            >
+              {v.label}
+            </Button>
+          ))}
         </div>
       </div>
 
@@ -126,7 +133,7 @@ export default function AgendaPage() {
         />
       ) : (
         <>
-          {chartData.length > 0 ? (
+          {chartData.length > 0 && view !== "year" ? (
             <NeoBarChart
               title="Sessões por dia"
               description="Distribuição das schedule_items"
@@ -137,6 +144,9 @@ export default function AgendaPage() {
           <ScheduleCalendar
             items={items}
             view={view}
+            cursor={cursor}
+            onCursorChange={setCursor}
+            onViewChange={setView}
             onItemClick={(item) =>
               toast.message(item.topic ?? "Sessão", {
                 description: `${item.scheduled_date} · ${item.duration_minutes} min`,
