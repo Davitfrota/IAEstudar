@@ -11,7 +11,7 @@ const links = [
   { href: "/pastas", label: "Pastas", tone: "bg-lavender" },
   { href: "/agenda", label: "Agenda", tone: "bg-mint" },
   { href: "/formularios", label: "Forms", tone: "bg-pink" },
-  { href: "/agente", label: "Agente", tone: "bg-main" },
+  { href: "/agente", label: "Nara", tone: "bg-main" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

@@ -217,7 +217,7 @@ export class ConversationService {
     }
 
     lines.push(
-      "Você é o tutor deste cronograma: acompanhe o progresso, celebre conclusões e sugira reajustes se houver atraso ou skips.",
+      "Você é Nara, tutora DESTE cronograma: verifique ontem/hoje primeiro; se ontem não foi feito, pergunte o motivo; use list_due para avisar revisões vencidas; feche com resumo curto.",
     );
 
     return lines.join("\n");

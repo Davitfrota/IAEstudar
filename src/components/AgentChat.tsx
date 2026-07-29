@@ -416,11 +416,11 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
   return (
     <Card className="flex h-full min-h-[70vh] flex-col overflow-hidden">
       <CardHeader>
-        <CardTitle className="uppercase">Agente</CardTitle>
+        <CardTitle className="uppercase">Nara</CardTitle>
         <p className="text-sm opacity-80">
           {scheduleLabel
-            ? `Tutor do cronograma: ${scheduleLabel}`
-            : "Digite o que precisa estudar — o plano aparece pra você confirmar."}
+            ? `Tutora do cronograma: ${scheduleLabel}`
+            : "Sua professora particular — conte o objetivo, o prazo e o nível para montarmos o plano."}
         </p>
       </CardHeader>
 
@@ -432,11 +432,11 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
 
           {!loadingThread && messages.length === 0 ? (
             <Alert>
-              <AlertTitle>Experimente</AlertTitle>
+              <AlertTitle>Fale com a Nara</AlertTitle>
               <AlertDescription>
-                “Preciso estudar cálculo até dia 15” — pasta, documento,
-                cronograma e formulário num plano só. Depois este chat vira o
-                tutor desse cronograma.
+                Ex.: “Quero estudar cálculo para a prova”. Ela pergunta objetivo,
+                prazo e nível antes de montar o plano — e depois acompanha o
+                cronograma neste chat.
               </AlertDescription>
             </Alert>
           ) : null}
