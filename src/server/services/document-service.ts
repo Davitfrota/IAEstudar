@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { DocumentRepository } from "@/server/repositories/document-repository";
 import { FolderRepository } from "@/server/repositories/folder-repository";
@@ -37,15 +37,20 @@ export function extractContentText(content: unknown, fallback = ""): string {
 }
 
 export class DocumentService {
-  private repo = new DocumentRepository(createAdminClient());
-  private folders = new FolderRepository(createAdminClient());
+  private async repo() {
+    return new DocumentRepository(await createDbClient());
+  }
 
-  list(userId: string, cursor?: string, limit = 50) {
-    return this.repo.list(userId, cursor, limit);
+  private async folders() {
+    return new FolderRepository(await createDbClient());
+  }
+
+  async list(userId: string, cursor?: string, limit = 50) {
+    return (await this.repo()).list(userId, cursor, limit);
   }
 
   async get(userId: string, documentId: string) {
-    const doc = await this.repo.getOwned(userId, documentId);
+    const doc = await (await this.repo()).getOwned(userId, documentId);
     if (!doc) {
       throw new AppError("Documento não encontrado", 404, "DOCUMENT_NOT_FOUND");
     }
@@ -54,7 +59,7 @@ export class DocumentService {
 
   async create(userId: string, input: CreateDocumentInput) {
     if (input.folderId) {
-      const folder = await this.folders.getOwned(userId, input.folderId);
+      const folder = await (await this.folders()).getOwned(userId, input.folderId);
       if (!folder) {
         throw new AppError("Pasta não encontrada", 404, "FOLDER_NOT_FOUND");
       }
@@ -72,7 +77,7 @@ export class DocumentService {
           ]
         : []);
 
-    return this.repo.create(userId, {
+    return (await this.repo()).create(userId, {
       title: input.title,
       folderId: input.folderId,
       content,
@@ -84,7 +89,7 @@ export class DocumentService {
     await this.get(userId, documentId);
 
     if (input.folderId) {
-      const folder = await this.folders.getOwned(userId, input.folderId);
+      const folder = await (await this.folders()).getOwned(userId, input.folderId);
       if (!folder) {
         throw new AppError("Pasta não encontrada", 404, "FOLDER_NOT_FOUND");
       }
@@ -96,7 +101,7 @@ export class DocumentService {
         ? extractContentText(input.content)
         : undefined);
 
-    return this.repo.update(userId, documentId, {
+    return (await this.repo()).update(userId, documentId, {
       title: input.title,
       folderId: input.folderId,
       content: input.content,
@@ -106,6 +111,6 @@ export class DocumentService {
 
   async softDelete(userId: string, documentId: string) {
     await this.get(userId, documentId);
-    await this.repo.softDelete(userId, documentId);
+    await (await this.repo()).softDelete(userId, documentId);
   }
 }

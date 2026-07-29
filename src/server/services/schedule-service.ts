@@ -1,5 +1,5 @@
 import { addDays, differenceInCalendarDays, formatISO, parseISO } from "date-fns";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { assertGenerateRateLimit } from "@/server/rate-limit";
 import { ScheduleRepository } from "@/server/repositories/schedule-repository";
@@ -10,14 +10,16 @@ function todayIsoDate() {
 }
 
 export class ScheduleService {
-  private repo = new ScheduleRepository(createAdminClient());
-
-  listSchedules(userId: string) {
-    return this.repo.listSchedules(userId);
+  private async repo() {
+    return new ScheduleRepository(await createDbClient());
   }
 
-  listItems(userId: string, from?: string, to?: string) {
-    return this.repo.listItems(userId, from, to);
+  async listSchedules(userId: string) {
+    return (await this.repo()).listSchedules(userId);
+  }
+
+  async listItems(userId: string, from?: string, to?: string) {
+    return (await this.repo()).listItems(userId, from, to);
   }
 
   /**
@@ -44,14 +46,15 @@ export class ScheduleService {
       );
     }
 
-    const schedule = await this.repo.createSchedule(userId, {
+    const repo = await this.repo();
+    const schedule = await repo.createSchedule(userId, {
       title: input.title,
       targetDate: input.targetDate ?? formatISO(end, { representation: "date" }),
       createdBy: "agent",
     });
 
     const duration = input.dailyMinutes ?? 30;
-    const items = await this.repo.createItems(
+    const items = await repo.createItems(
       topicsFitting.map((topic, index) => ({
         schedule_id: schedule.id,
         user_id: userId,

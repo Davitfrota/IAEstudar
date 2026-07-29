@@ -1,12 +1,12 @@
-# IA Estudar — Fase 1
+# IA Estudar
 
 Plataforma de estudo pessoal: pastas, documentos, cronogramas e formulários (FSRS), operados por um agente MCP.
 
 ## Stack
 
 - Next.js (App Router) + TypeScript + Tailwind
-- Clerk (auth) + Supabase (Postgres, RLS, Realtime)
-- Anthropic Messages API + ferramentas MCP in-process
+- **Supabase Auth + Postgres** (RLS com `auth.uid()`)
+- **Groq** (OpenAI-compatible) + ferramentas MCP in-process
 - BlockNote (editor) + ts-fsrs (revisão espaçada)
 
 ## Setup
@@ -14,18 +14,15 @@ Plataforma de estudo pessoal: pastas, documentos, cronogramas e formulários (FS
 ```bash
 pnpm install
 cp .env.example .env.local
-# Preencha Clerk, Supabase e ANTHROPIC_API_KEY
 ```
 
-### Banco
+Preencha no `.env.local`:
 
-```bash
-npx supabase init   # se ainda não houver config
-npx supabase db reset
-# ou aplique supabase/migrations/20260728220000_phase1_schema.sql no SQL Editor
-```
+- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `GROQ_API_KEY` (e opcionalmente `GROQ_MODEL`, default `llama-3.3-70b-versatile`)
+- `SUPABASE_SERVICE_ROLE_KEY` (opcional no server)
 
-Configure o Clerk como provedor JWT no Supabase (Third-Party Auth) para que `auth.jwt()->>'sub'` = `clerk_id` e o RLS funcione no client. As rotas `/api/*` usam `SUPABASE_SERVICE_ROLE_KEY` e sempre escopam por `user.id` interno resolvido do Clerk.
+No Dashboard Auth, desative **Confirm email** para desenvolvimento local.
 
 ### Dev
 
@@ -33,14 +30,18 @@ Configure o Clerk como provedor JWT no Supabase (Third-Party Auth) para que `aut
 pnpm dev
 ```
 
-Rotas autenticadas: `/pastas`, `/agenda`, `/formularios`, `/agente`.
+Rotas: `/sign-in`, `/sign-up`, `/pastas`, `/agenda`, `/formularios`, `/agente`.
 
-### MCP stdio (opcional)
+## Fase 2 (UX + E2E do agente)
 
-```bash
-IA_ESTUDAR_USER_ID=<uuid-da-tabela-users> pnpm mcp
-```
+- Tool MCP `update_document` (com confirmação se sobrescrever)
+- Botão **Confirmar** no chat para schedule/form/update
+- Realtime na agenda, formulários e árvore de pastas
+- Atalhos na prática: Espaço (revelar), 1–4 (Again/Hard/Good/Easy)
+- `PATCH /api/folders/[id]` e `confirmed` em `POST /api/schedules`
+- Preview de `generate_form` com **estimativa de cards/créditos/custo** + **edição campo a campo** (roadmap RemNote)
 
-## Sucesso da Fase 1
+## Specs
 
-No `/agente`, uma instrução em linguagem natural deve popular pasta → documento → cronograma → formulário via tools (`create_folder`, `create_document`, `generate_schedule`, `generate_form`), com preview/confirmação em schedule/form.
+- [Fase 1](docs/study-platform-fase1-spec.md)
+- [RemNote — análise e roadmap](docs/remnote-analise-roadmap.md)

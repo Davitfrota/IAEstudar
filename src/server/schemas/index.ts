@@ -21,6 +21,21 @@ export const updateDocumentSchema = z.object({
   contentText: z.string().optional(),
 });
 
+/** Input do MCP update_document (texto plano + confirmação se sobrescrever). */
+export const mcpUpdateDocumentSchema = z.object({
+  documentId: z.string().uuid(),
+  title: nameSchema.optional(),
+  contentText: z.string().min(1).max(100_000).optional(),
+  folderId: z.string().uuid().nullable().optional(),
+  confirmed: z.boolean().optional().default(false),
+});
+
+export const updateFolderSchema = z.object({
+  name: nameSchema.optional(),
+  parentFolderId: z.string().uuid().nullable().optional(),
+  position: z.number().int().min(0).optional(),
+});
+
 export const generateScheduleSchema = z
   .object({
     title: nameSchema,
@@ -43,7 +58,17 @@ export const generateScheduleSchema = z
     }
   });
 
+export const generateScheduleApiSchema = generateScheduleSchema.and(
+  z.object({ confirmed: z.boolean().optional().default(false) }),
+);
+
 export const formTypeSchema = z.enum(["flashcard_deck", "quiz", "open_form"]);
+
+export const generatedQuestionSchema = z.object({
+  prompt: z.string().trim().min(1).max(4000),
+  answer: z.string().trim().min(1).max(4000),
+  choices: z.array(z.string().trim().min(1)).max(8).optional(),
+});
 
 export const generateFormSchema = z.object({
   sourceDocumentId: z.string().uuid(),
@@ -51,6 +76,8 @@ export const generateFormSchema = z.object({
   instruction: z.string().trim().min(1).max(2000),
   questionCount: z.number().int().min(1).max(50).optional().default(10),
   confirmed: z.boolean().optional().default(false),
+  /** Questões editadas no preview — se presentes no confirm, não regenera com IA. */
+  questions: z.array(generatedQuestionSchema).min(1).max(50).optional(),
 });
 
 export const fsrsRatingSchema = z.enum(["again", "hard", "good", "easy"]);
@@ -65,11 +92,25 @@ export const listDueSchema = z.object({
   folderId: z.string().uuid().optional(),
 });
 
-export const agentChatSchema = z.object({
-  message: z.string().trim().min(1).max(8000),
-  conversationId: z.string().uuid().optional(),
-  confirmToolCallId: z.string().optional(),
-});
+export const agentChatSchema = z
+  .object({
+    message: z.string().trim().min(1).max(8000).optional(),
+    conversationId: z.string().uuid().optional(),
+    confirmTool: z
+      .object({
+        name: z.enum(["generate_schedule", "generate_form", "update_document"]),
+        input: z.record(z.string(), z.unknown()),
+      })
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.message && !data.confirmTool) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Informe message ou confirmTool",
+      });
+    }
+  });
 
 export const paginationSchema = z.object({
   cursor: z.string().uuid().optional(),
@@ -79,6 +120,8 @@ export const paginationSchema = z.object({
 export type CreateFolderInput = z.infer<typeof createFolderSchema>;
 export type CreateDocumentInput = z.infer<typeof createDocumentSchema>;
 export type UpdateDocumentInput = z.infer<typeof updateDocumentSchema>;
+export type McpUpdateDocumentInput = z.infer<typeof mcpUpdateDocumentSchema>;
+export type UpdateFolderInput = z.infer<typeof updateFolderSchema>;
 export type GenerateScheduleInput = z.infer<typeof generateScheduleSchema>;
 export type GenerateFormInput = z.infer<typeof generateFormSchema>;
 export type RecordReviewInput = z.infer<typeof recordReviewSchema>;

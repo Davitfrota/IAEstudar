@@ -1,17 +1,18 @@
-import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
-import { Fraunces, Source_Sans_3 } from "next/font/google";
+import { Archivo_Black, Space_Grotesk } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
-const display = Fraunces({
-  variable: "--font-display",
+const heading = Archivo_Black({
+  variable: "--font-heading",
   subsets: ["latin"],
+  weight: "400",
 });
 
-const sans = Source_Sans_3({
+const sans = Space_Grotesk({
   variable: "--font-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -25,16 +26,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html
-        lang="pt-BR"
-        className={`${display.variable} ${sans.variable} h-full antialiased`}
-      >
-        <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--fg)]">
-          {children}
-          <Toaster richColors position="top-right" />
-        </body>
-      </html>
-    </ClerkProvider>
+    <html
+      lang="pt-BR"
+      className={`${heading.variable} ${sans.variable} h-full`}
+    >
+      <body className="min-h-full flex flex-col">
+        {children}
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            className:
+              "!border-2 !border-black !shadow-[4px_4px_0_#000] !rounded-[5px] !font-semibold",
+          }}
+        />
+      </body>
+    </html>
   );
 }

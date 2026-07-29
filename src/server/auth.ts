@@ -1,28 +1,28 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createDbClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { AppError } from "@/server/http";
 import type { AppUser } from "@/server/types";
 
-export async function requireClerkUserId(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) {
+/** Usuário autenticado via Supabase Auth; garante linha em public.users. */
+export async function requireAppUser(): Promise<AppUser> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
     throw new AppError("Não autenticado", 401, "UNAUTHORIZED");
   }
-  return userId;
-}
 
-/** Resolve (e se preciso cria) o usuário interno a partir do Clerk. */
-export async function requireAppUser(): Promise<AppUser> {
-  const clerkId = await requireClerkUserId();
-  const supabase = createAdminClient();
-
-  const { data: existing, error } = await supabase
+  const db = await createDbClient();
+  const { data: existing, error: lookupError } = await db
     .from("users")
-    .select("id, clerk_id, email")
-    .eq("clerk_id", clerkId)
+    .select("id, email")
+    .eq("id", user.id)
     .maybeSingle();
 
-  if (error) {
+  if (lookupError) {
     throw new AppError("Falha ao carregar usuário", 500, "USER_LOOKUP");
   }
 
@@ -30,16 +30,10 @@ export async function requireAppUser(): Promise<AppUser> {
     return existing as AppUser;
   }
 
-  const clerkUser = await currentUser();
-  const email =
-    clerkUser?.primaryEmailAddress?.emailAddress ??
-    clerkUser?.emailAddresses?.[0]?.emailAddress ??
-    null;
-
-  const { data: created, error: insertError } = await supabase
+  const { data: created, error: insertError } = await db
     .from("users")
-    .insert({ clerk_id: clerkId, email })
-    .select("id, clerk_id, email")
+    .insert({ id: user.id, email: user.email ?? null })
+    .select("id, email")
     .single();
 
   if (insertError || !created) {

@@ -1,37 +1,164 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Neobrutalism structure × paleta IA Estudar
+  Lavanda  #C8B6E2 — destaques / ícones
+  Azul     #A8D8EA — fundo secundário
+  Pêssego  #FFD3B4 — botões / CTAs (main)
+  Rosa     #FFAAA7 — alertas / tags
+  Amarelo  #FFF3B0 — fundo de destaque (page)
+  Menta    #B5EAD7 — sucesso / confirmações
+*/
+
 :root {
-  --bg: #f3efe6;
-  --bg-elevated: #fffdf8;
-  --fg: #1c241c;
-  --muted: #5c6b5c;
-  --line: #d5cfbf;
-  --accent: #1f6b4a;
-  --accent-soft: #d8efe4;
-  --danger: #9b2c2c;
-  --warn: #8a6d1d;
-  --shadow: 0 12px 40px rgba(28, 36, 28, 0.08);
+  --background: #fff3b0;
+  --secondary-background: #a8d8ea;
+  --foreground: #000000;
+  --main-foreground: #000000;
+  --main: #ffd3b4;
+  --border: #000000;
+  --ring: #000000;
+  --overlay: rgb(0 0 0 / 0.8);
+  --shadow: 4px 4px 0px 0px var(--border);
+
+  --lavender: #c8b6e2;
+  --baby-blue: #a8d8ea;
+  --peach: #ffd3b4;
+  --pink: #ffaaa7;
+  --butter: #fff3b0;
+  --mint: #b5ead7;
+
+  --chart-1: #ffd3b4;
+  --chart-2: #ffaaa7;
+  --chart-3: #c8b6e2;
+  --chart-4: #b5ead7;
+  --chart-5: #a8d8ea;
+  --chart-active-dot: #000;
+}
+
+.dark {
+  --background: #3d3550;
+  --secondary-background: #2a3340;
+  --foreground: #fff8e7;
+  --main-foreground: #000000;
+  --main: #ffd3b4;
+  --border: #000000;
+  --ring: #ffffff;
+  --shadow: 4px 4px 0px 0px var(--border);
+
+  --lavender: #c8b6e2;
+  --baby-blue: #a8d8ea;
+  --peach: #ffd3b4;
+  --pink: #ffaaa7;
+  --butter: #fff3b0;
+  --mint: #b5ead7;
+
+  --chart-1: #ffd3b4;
+  --chart-2: #ffaaa7;
+  --chart-3: #c8b6e2;
+  --chart-4: #b5ead7;
+  --chart-5: #a8d8ea;
+  --chart-active-dot: #fff;
 }
 
 @theme inline {
-  --color-background: var(--bg);
-  --color-foreground: var(--fg);
+  --color-main: var(--main);
+  --color-background: var(--background);
+  --color-secondary-background: var(--secondary-background);
+  --color-foreground: var(--foreground);
+  --color-main-foreground: var(--main-foreground);
+  --color-border: var(--border);
+  --color-overlay: var(--overlay);
+  --color-ring: var(--ring);
+
+  --color-lavender: var(--lavender);
+  --color-baby-blue: var(--baby-blue);
+  --color-peach: var(--peach);
+  --color-pink: var(--pink);
+  --color-butter: var(--butter);
+  --color-mint: var(--mint);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --spacing-boxShadowX: 4px;
+  --spacing-boxShadowY: 4px;
+  --spacing-reverseBoxShadowX: -4px;
+  --spacing-reverseBoxShadowY: -4px;
+  --radius-base: 15px;
+  --shadow-shadow: var(--shadow);
+  --font-weight-base: 500;
+  --font-weight-heading: 700;
+
   --font-sans: var(--font-sans);
-  --font-display: var(--font-display);
+  --font-heading: var(--font-heading);
+
+  --animate-marquee: marquee 25s linear infinite;
+  --animate-marquee2: marquee2 25s linear infinite;
+
+  @keyframes marquee {
+    0% {
+      transform: translateX(0%);
+    }
+    100% {
+      transform: translateX(-100%);
+    }
+  }
+
+  @keyframes marquee2 {
+    0% {
+      transform: translateX(100%);
+    }
+    100% {
+      transform: translateX(0%);
+    }
+  }
 }
 
-body {
-  background:
-    radial-gradient(1200px 600px at 10% -10%, #e7f2ea 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #efe6d4 0%, transparent 50%),
-    var(--bg);
-  color: var(--fg);
-  font-family: var(--font-sans), "Segoe UI", sans-serif;
+@layer utilities {
+  .font-base {
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-weight: var(--font-weight-base);
+  }
+
+  .font-heading {
+    font-family: var(--font-heading), var(--font-sans), ui-sans-serif, system-ui,
+      sans-serif;
+    font-weight: var(--font-weight-heading);
+  }
 }
 
-h1,
-h2,
-h3,
-.font-display {
-  font-family: var(--font-display), Georgia, serif;
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-base antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading;
+  }
 }

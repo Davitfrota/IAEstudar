@@ -1,19 +1,20 @@
 import { z } from "zod";
-import { AppError } from "@/server/http";
-import { AgentActionRepository } from "@/server/repositories/agent-action-repository";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createDbClient } from "@/lib/supabase/admin";
 import {
   createDocumentSchema,
   createFolderSchema,
   generateFormSchema,
   generateScheduleSchema,
   listDueSchema,
+  mcpUpdateDocumentSchema,
   recordReviewSchema,
 } from "@/server/schemas";
 import { DocumentService } from "@/server/services/document-service";
 import { FolderService } from "@/server/services/folder-service";
 import { FormService } from "@/server/services/form-service";
 import { ScheduleService } from "@/server/services/schedule-service";
+import { AppError } from "@/server/http";
+import { AgentActionRepository } from "@/server/repositories/agent-action-repository";
 
 export type ToolContext = {
   userId: string;
@@ -36,7 +37,7 @@ async function withAudit(
   input: unknown,
   run: () => Promise<ToolResult>,
 ): Promise<ToolResult> {
-  const audit = new AgentActionRepository(createAdminClient());
+  const audit = new AgentActionRepository(await createDbClient());
   try {
     const result = await run();
     await audit.log({
@@ -80,7 +81,8 @@ export const mcpToolDefinitions = [
   },
   {
     name: "create_document",
-    description: "Cria um documento (anotações) opcionalmente dentro de uma pasta.",
+    description:
+      "Cria um documento (anotações) opcionalmente dentro de uma pasta. Prefira já incluir initialContent com o texto de estudo (≥50 chars) se for gerar formulário em seguida.",
     inputSchema: {
       type: "object",
       properties: {
@@ -89,6 +91,22 @@ export const mcpToolDefinitions = [
         initialContent: { type: "string" },
       },
       required: ["title"],
+    },
+  },
+  {
+    name: "update_document",
+    description:
+      "Atualiza título e/ou conteúdo textual de um documento existente. Se o documento já tem conteúdo e contentText for enviado, exige confirmed=true (não sobrescreve sem confirmação).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        documentId: { type: "string" },
+        title: { type: "string" },
+        contentText: { type: "string" },
+        folderId: { type: "string" },
+        confirmed: { type: "boolean" },
+      },
+      required: ["documentId"],
     },
   },
   {
@@ -110,7 +128,7 @@ export const mcpToolDefinitions = [
   {
     name: "generate_form",
     description:
-      "Gera formulário (flashcard_deck|quiz|open_form) a partir de um documento. Exige confirmação explícita (confirmed=true) para persistir.",
+      "Gera formulário (flashcard_deck|quiz|open_form) a partir de um documento. Documento precisa ter content_text ≥50 chars. Exige confirmed=true para persistir.",
     inputSchema: {
       type: "object",
       properties: {
@@ -171,6 +189,64 @@ const handlers: Record<string, ToolHandler> = {
       const input = createDocumentSchema.parse(raw);
       const doc = await new DocumentService().create(ctx.userId, input);
       return { status: "success", data: { documentId: doc.id } };
+    }),
+
+  update_document: async (ctx, raw) =>
+    withAudit(ctx, "update_document", raw, async () => {
+      const input = mcpUpdateDocumentSchema.parse(raw);
+      const docs = new DocumentService();
+      const existing = await docs.get(ctx.userId, input.documentId);
+      const hasContent = (existing.content_text ?? "").trim().length > 0;
+
+      if (input.contentText && hasContent && !input.confirmed) {
+        return {
+          status: "pending_confirmation",
+          data: {
+            preview: {
+              documentId: input.documentId,
+              currentTitle: existing.title,
+              newTitle: input.title ?? existing.title,
+              currentLength: existing.content_text.length,
+              newLength: input.contentText.length,
+              previewText: input.contentText.slice(0, 280),
+            },
+            message:
+              "Documento já tem conteúdo. Confirme com o usuário e chame com confirmed=true para sobrescrever.",
+          },
+        };
+      }
+
+      if (!input.title && !input.contentText && input.folderId === undefined) {
+        return {
+          status: "error",
+          error: "Informe title, contentText ou folderId para atualizar",
+        };
+      }
+
+      const content = input.contentText
+        ? [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: input.contentText }],
+            },
+          ]
+        : undefined;
+
+      const updated = await docs.update(ctx.userId, input.documentId, {
+        title: input.title,
+        folderId: input.folderId,
+        content,
+        contentText: input.contentText,
+      });
+
+      return {
+        status: "success",
+        data: {
+          documentId: updated.id,
+          title: updated.title,
+          contentLength: updated.content_text.length,
+        },
+      };
     }),
 
   generate_schedule: async (ctx, raw) =>
@@ -256,7 +332,19 @@ export async function executeMcpTool(
   return handler(ctx, input);
 }
 
-/** Ferramentas no formato Anthropic Messages API tool definitions. */
+/** Ferramentas no formato OpenAI / Groq function calling. */
+export function openaiTools() {
+  return mcpToolDefinitions.map((tool) => ({
+    type: "function" as const,
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+    },
+  }));
+}
+
+/** @deprecated Use openaiTools — mantido por compatibilidade. */
 export function anthropicTools() {
   return mcpToolDefinitions.map((tool) => ({
     name: tool.name,

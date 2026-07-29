@@ -64,7 +64,7 @@ function EditorBody({ document, onChange, isStale }: Props) {
   return (
     <div className="flex h-full min-h-[60vh] flex-col gap-3">
       {isStale ? (
-        <div className="rounded-md border border-[var(--warn)]/40 bg-[#fff6d9] px-3 py-2 text-sm text-[var(--warn)]">
+        <div className="rounded-base border-2 border-border bg-[var(--chart-3)] px-3 py-2 text-sm font-heading">
           Formulários gerados a partir deste documento estão desatualizados
           (is_stale). Regeneração só sob pedido.
         </div>
@@ -75,10 +75,10 @@ function EditorBody({ document, onChange, isStale }: Props) {
           setTitle(e.target.value);
           scheduleSave({ title: e.target.value });
         }}
-        className="font-display w-full border-0 bg-transparent text-3xl outline-none"
+        className="font-heading w-full border-0 bg-transparent text-3xl uppercase outline-none"
         placeholder="Título do documento"
       />
-      <div className="min-h-[480px] flex-1 rounded-xl border border-[var(--line)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow)]">
+      <div className="min-h-[480px] flex-1 rounded-base border-2 border-border bg-secondary-background p-2 shadow-shadow">
         <BlockNoteView
           editor={editor}
           onChange={() => {

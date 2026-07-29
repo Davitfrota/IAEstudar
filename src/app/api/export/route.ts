@@ -1,4 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createDbClient } from "@/lib/supabase/admin";
 import { requireAppUser } from "@/server/auth";
 import { fail, ok } from "@/server/http";
 import { assertExportRateLimit } from "@/server/rate-limit";
@@ -8,7 +8,7 @@ export async function GET() {
     const user = await requireAppUser();
     assertExportRateLimit(user.id);
 
-    const db = createAdminClient();
+    const db = await createDbClient();
     const [
       folders,
       documents,
@@ -34,7 +34,7 @@ export async function GET() {
 
     return ok({
       exportedAt: new Date().toISOString(),
-      user: { id: user.id, clerk_id: user.clerk_id, email: user.email },
+      user: { id: user.id, email: user.email },
       folders: folders.data,
       documents: documents.data,
       study_schedules: schedules.data,

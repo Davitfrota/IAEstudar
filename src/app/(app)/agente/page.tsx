@@ -1,8 +1,15 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { toast } from "sonner";
 import { AgentChat } from "@/components/AgentChat";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export default function AgentePage() {
   const [lastPreview, setLastPreview] = useState<{
@@ -15,33 +22,37 @@ export default function AgentePage() {
       <AgentChat
         onToolCallPreview={(tool, input) => {
           setLastPreview({ tool, input });
-          if (tool === "create_document") {
-            toast.success("Documento criado");
-          }
-          if (tool === "generate_schedule") {
-            toast.success("Cronograma em preview / gerado");
-          }
-          if (tool === "generate_form") {
-            toast.success("Formulário em preview / pronto");
-          }
+        }}
+        onToolExecuted={(tool) => {
+          if (tool === "create_document") toast.success("Documento criado");
+          if (tool === "update_document") toast.success("Documento atualizado");
+          if (tool === "generate_schedule") toast.success("Cronograma gerado");
+          if (tool === "generate_form") toast.success("Formulário pronto");
+          if (tool === "create_folder") toast.success("Pasta criada");
         }}
       />
-      <aside className="rounded-2xl border border-[var(--line)] bg-[var(--bg-elevated)] p-4">
-        <h2 className="font-display text-xl">Preview</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          generate_schedule e generate_form pedem confirmação antes de
-          persistir.
-        </p>
-        {lastPreview ? (
-          <pre className="mt-4 overflow-x-auto rounded-lg bg-black/5 p-3 text-xs">
-            {JSON.stringify(lastPreview, null, 2)}
-          </pre>
-        ) : (
-          <p className="mt-6 text-sm text-[var(--muted)]">
-            Nenhuma ferramenta pendente.
+      <Card className="h-fit bg-mint">
+        <CardHeader>
+          <CardTitle>Preview</CardTitle>
+          <p className="text-sm opacity-80">
+            Use o botão Confirmar no chat para persistir schedule/form/update.
           </p>
-        )}
-      </aside>
+        </CardHeader>
+        <CardContent>
+          {lastPreview ? (
+            <Alert variant="lavender">
+              <AlertTitle>{lastPreview.tool}</AlertTitle>
+              <AlertDescription>
+                <pre className="mt-2 overflow-x-auto text-xs">
+                  {JSON.stringify(lastPreview.input, null, 2)}
+                </pre>
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <p className="text-sm">Nenhuma ferramenta pendente.</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -12,9 +12,7 @@ export async function POST(request: Request) {
     const stream = new ReadableStream({
       async start(controller) {
         const send = (payload: unknown) => {
-          controller.enqueue(
-            encoder.encode(`${JSON.stringify(payload)}\n`),
-          );
+          controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
         };
 
         try {
@@ -22,6 +20,7 @@ export async function POST(request: Request) {
             userId: user.id,
             message: body.message,
             conversationId: body.conversationId,
+            confirmTool: body.confirmTool,
           })) {
             if (event.type === "textDelta") {
               send({ textDelta: event.textDelta });

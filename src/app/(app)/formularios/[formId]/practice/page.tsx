@@ -20,21 +20,20 @@ export default function PracticePage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/forms/${params.formId}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error?.message ?? "Erro");
-      setQuestions(json.data.questions);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/forms/${params.formId}`);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error?.message ?? "Erro");
+        setQuestions(json.data.questions);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Falha");
+      } finally {
+        setLoading(false);
+      }
+    };
     void load();
   }, [params.formId]);
 
@@ -59,7 +58,9 @@ export default function PracticePage() {
   };
 
   if (loading) {
-    return <div className="h-40 animate-pulse rounded-xl bg-black/5" />;
+    return (
+      <div className="h-40 animate-pulse rounded-base border-2 border-border bg-secondary-background shadow-shadow" />
+    );
   }
 
   if (questions.length === 0) {
@@ -73,7 +74,7 @@ export default function PracticePage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-3xl">Prática</h1>
+      <h1 className="font-heading text-3xl uppercase">Prática</h1>
       <PracticeQueue
         formId={params.formId}
         questions={questions}

@@ -1,5 +1,7 @@
 "use client";
 
+import { cn } from "@/lib/utils";
+
 type Folder = {
   id: string;
   name: string;
@@ -36,28 +38,29 @@ export function FolderTree({
         <button
           type="button"
           onClick={() => onSelect(folder.id, "folder")}
-          className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+          className={cn(
+            "mb-1 flex w-full items-center gap-2 rounded-base border-2 border-border px-2 py-1.5 text-left text-sm font-heading transition-all",
             selectedId === folder.id
-              ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-              : "hover:bg-black/5"
-          }`}
+              ? "bg-main text-main-foreground shadow-shadow"
+              : "bg-secondary-background hover:shadow-shadow",
+          )}
         >
-          <span className="text-[var(--muted)]">/</span>
-          <span className="truncate font-medium">{folder.name}</span>
+          <span className="text-xs">/</span>
+          <span className="truncate">{folder.name}</span>
         </button>
         {docs.map((doc) => (
           <button
             key={doc.id}
             type="button"
             onClick={() => onSelect(doc.id, "document")}
-            className={`mb-1 ml-3 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+            className={cn(
+              "mb-1 ml-3 flex w-full items-center gap-2 rounded-base border-2 border-border px-2 py-1.5 text-left text-sm transition-all",
               selectedId === doc.id
-                ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-                : "hover:bg-black/5"
-            }`}
-            style={{ paddingLeft: 8 }}
+                ? "bg-[var(--chart-3)] font-heading shadow-shadow"
+                : "bg-secondary-background hover:shadow-shadow",
+            )}
           >
-            <span className="text-[var(--muted)]">·</span>
+            <span className="text-xs">·</span>
             <span className="truncate">{doc.title}</span>
           </button>
         ))}
@@ -76,13 +79,14 @@ export function FolderTree({
           key={doc.id}
           type="button"
           onClick={() => onSelect(doc.id, "document")}
-          className={`mb-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+          className={cn(
+            "mb-1 flex w-full items-center gap-2 rounded-base border-2 border-border px-2 py-1.5 text-left text-sm transition-all",
             selectedId === doc.id
-              ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-              : "hover:bg-black/5"
-          }`}
+              ? "bg-[var(--chart-3)] font-heading shadow-shadow"
+              : "bg-secondary-background hover:shadow-shadow",
+          )}
         >
-          <span className="text-[var(--muted)]">·</span>
+          <span className="text-xs">·</span>
           <span className="truncate">{doc.title}</span>
         </button>
       ))}

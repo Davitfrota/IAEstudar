@@ -1,6 +1,6 @@
 import { requireAppUser } from "@/server/auth";
 import { fail, ok, parseJson } from "@/server/http";
-import { generateScheduleSchema } from "@/server/schemas";
+import { generateScheduleApiSchema } from "@/server/schemas";
 import { ScheduleService } from "@/server/services/schedule-service";
 
 export async function GET(request: Request) {
@@ -23,7 +23,21 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = await requireAppUser();
-    const body = await parseJson(request, generateScheduleSchema);
+    const body = await parseJson(request, generateScheduleApiSchema);
+
+    if (!body.confirmed) {
+      return ok({
+        status: "pending_confirmation",
+        preview: {
+          title: body.title,
+          topics: body.topics,
+          targetDate: body.targetDate ?? null,
+          dailyMinutes: body.dailyMinutes ?? 30,
+          estimatedSessions: body.topics.length,
+        },
+      });
+    }
+
     const result = await new ScheduleService().generate(user.id, body);
     return ok(result, 201);
   } catch (error) {

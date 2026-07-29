@@ -7,8 +7,8 @@ import {
   type Card,
   type Grade,
 } from "ts-fsrs";
-import Anthropic from "@anthropic-ai/sdk";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createGroqClient, groqModel } from "@/lib/ai/groq";
+import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { assertGenerateRateLimit } from "@/server/rate-limit";
 import { DocumentRepository } from "@/server/repositories/document-repository";
@@ -109,42 +109,53 @@ type GeneratedQuestion = {
 };
 
 export class FormService {
-  private repo = new FormRepository(createAdminClient());
-  private documents = new DocumentRepository(createAdminClient());
   private scheduler = fsrs(generatorParameters({ enable_fuzz: true }));
 
-  list(userId: string) {
-    return this.repo.list(userId);
+  private async forms() {
+    return new FormRepository(await createDbClient());
+  }
+
+  private async documents() {
+    return new DocumentRepository(await createDbClient());
+  }
+
+  async list(userId: string) {
+    return (await this.forms()).list(userId);
   }
 
   async get(userId: string, formId: string) {
-    const form = await this.repo.getOwned(userId, formId);
+    const form = await (await this.forms()).getOwned(userId, formId);
     if (!form) {
       throw new AppError("Formulário não encontrado", 404, "FORM_NOT_FOUND");
     }
     return form;
   }
 
-  countDue(userId: string) {
-    return this.repo.countDue(userId);
+  async countDue(userId: string) {
+    return (await this.forms()).countDue(userId);
   }
 
-  listDue(userId: string, input: { date?: string; folderId?: string } = {}) {
-    return this.repo.listDue(userId, input);
+  async listDue(userId: string, input: { date?: string; folderId?: string } = {}) {
+    return (await this.forms()).listDue(userId, input);
   }
 
   async listPracticeQueue(userId: string, formId: string) {
     await this.get(userId, formId);
-    return this.repo.listDueForForm(userId, formId);
+    return (await this.forms()).listDueForForm(userId, formId);
   }
 
   async softDelete(userId: string, formId: string) {
     await this.get(userId, formId);
-    await this.repo.softDelete(userId, formId);
+    await (await this.forms()).softDelete(userId, formId);
   }
 
   async previewGenerate(userId: string, input: GenerateFormInput) {
-    const doc = await this.documents.getOwned(userId, input.sourceDocumentId);
+    assertGenerateRateLimit(userId, "generate_form");
+
+    const doc = await (await this.documents()).getOwned(
+      userId,
+      input.sourceDocumentId,
+    );
     if (!doc) {
       throw new AppError("Documento não encontrado", 404, "DOCUMENT_NOT_FOUND");
     }
@@ -155,6 +166,20 @@ export class FormService {
         "DOCUMENT_TOO_SHORT",
       );
     }
+
+    const questionCount = input.questionCount ?? 10;
+    const questions = await this.generateQuestionsWithAi({
+      type: input.type,
+      instruction: input.instruction,
+      contentText: doc.content_text,
+      questionCount,
+    });
+
+    const estimate = estimateGenerationCost({
+      contentChars: doc.content_text.length,
+      questionCount: questions.length,
+      model: groqModel(),
+    });
 
     return {
       status: "pending_confirmation" as const,
@@ -163,16 +188,24 @@ export class FormService {
         sourceTitle: doc.title,
         type: input.type,
         instruction: input.instruction,
-        questionCount: input.questionCount ?? 10,
+        questionCount: questions.length,
         contentPreview: doc.content_text.slice(0, 280),
+        questions,
+        estimate,
       },
     };
   }
 
   async generate(userId: string, input: GenerateFormInput) {
-    assertGenerateRateLimit(userId, "generate_form");
+    // Se já veio do preview editado, não cobra rate limit de novo nem regenera.
+    if (!input.questions?.length) {
+      assertGenerateRateLimit(userId, "generate_form");
+    }
 
-    const doc = await this.documents.getOwned(userId, input.sourceDocumentId);
+    const doc = await (await this.documents()).getOwned(
+      userId,
+      input.sourceDocumentId,
+    );
     if (!doc) {
       throw new AppError("Documento não encontrado", 404, "DOCUMENT_NOT_FOUND");
     }
@@ -184,14 +217,18 @@ export class FormService {
       );
     }
 
-    const questions = await this.generateQuestionsWithAi({
-      type: input.type,
-      instruction: input.instruction,
-      contentText: doc.content_text,
-      questionCount: input.questionCount ?? 10,
-    });
+    const questions =
+      input.questions?.length ?
+        input.questions
+      : await this.generateQuestionsWithAi({
+          type: input.type,
+          instruction: input.instruction,
+          contentText: doc.content_text,
+          questionCount: input.questionCount ?? 10,
+        });
 
-    const form = await this.repo.create(userId, {
+    const forms = await this.forms();
+    const form = await forms.create(userId, {
       sourceDocumentId: doc.id,
       title: `${doc.title} — ${input.type}`,
       type: input.type,
@@ -199,7 +236,7 @@ export class FormService {
     });
 
     const qType = questionTypeForForm(input.type);
-    const created = await this.repo.createQuestions(
+    const created = await forms.createQuestions(
       questions.map((q, index) => ({
         form_id: form.id,
         type: qType,
@@ -222,47 +259,39 @@ export class FormService {
     contentText: string;
     questionCount: number;
   }): Promise<GeneratedQuestion[]> {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
+    if (!process.env.GROQ_API_KEY) {
       throw new AppError(
-        "ANTHROPIC_API_KEY não configurada",
+        "GROQ_API_KEY não configurada",
         500,
         "AI_NOT_CONFIGURED",
       );
     }
 
-    const client = new Anthropic({ apiKey });
+    const client = createGroqClient();
     const system = promptForType(input.type);
 
-    const response = await client.messages.create({
-      model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514",
+    const response = await client.chat.completions.create({
+      model: groqModel(),
       max_tokens: 4096,
-      system,
+      temperature: 0.4,
       messages: [
+        { role: "system", content: system },
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: [
-                `Instrução do usuário: ${input.instruction}`,
-                `Quantidade de questões: ${input.questionCount}`,
-                "Conteúdo do documento:",
-                input.contentText.slice(0, 12000),
-                "",
-                'Responda APENAS com JSON: {"questions":[{"prompt":"...","answer":"...","choices":["..."]}]}',
-                "choices só para quiz (múltipla escolha).",
-              ].join("\n"),
-            },
-          ],
+            `Instrução do usuário: ${input.instruction}`,
+            `Quantidade de questões: ${input.questionCount}`,
+            "Conteúdo do documento:",
+            input.contentText.slice(0, 12000),
+            "",
+            'Responda APENAS com JSON: {"questions":[{"prompt":"...","answer":"...","choices":["..."]}]}',
+            "choices só para quiz (múltipla escolha).",
+          ].join("\n"),
         },
       ],
     });
 
-    const text = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
+    const text = response.choices[0]?.message?.content ?? "";
 
     const parsed = JSON.parse(extractJson(text)) as {
       questions?: GeneratedQuestion[];
@@ -280,7 +309,8 @@ export class FormService {
   }
 
   async recordReview(userId: string, formQuestionId: string, rating: FsrsRating) {
-    const question = await this.repo.getQuestionOwned(userId, formQuestionId);
+    const repo = await this.forms();
+    const question = await repo.getQuestionOwned(userId, formQuestionId);
     if (!question) {
       throw new AppError("Questão não encontrada", 404, "QUESTION_NOT_FOUND");
     }
@@ -291,7 +321,7 @@ export class FormService {
     const result = this.scheduler.next(beforeCard, now, ratingMap[rating]);
     const stateAfter = fromFsrsCard(result.card);
 
-    await this.repo.insertReview({
+    await repo.insertReview({
       formQuestionId,
       userId,
       rating,
@@ -299,7 +329,7 @@ export class FormService {
       stateAfter,
     });
 
-    await this.repo.updateFsrsState(formQuestionId, stateAfter);
+    await repo.updateFsrsState(formQuestionId, stateAfter);
 
     return {
       nextDue: stateAfter.due,
@@ -315,4 +345,26 @@ function extractJson(text: string): string {
   const end = text.lastIndexOf("}");
   if (start >= 0 && end > start) return text.slice(start, end + 1);
   return text;
+}
+
+/** Estimativa transparente estilo RemNote (antes de persistir). */
+function estimateGenerationCost(input: {
+  contentChars: number;
+  questionCount: number;
+  model: string;
+}) {
+  const inputTokens = Math.ceil(input.contentChars / 4) + 400;
+  const outputTokens = input.questionCount * 120;
+  // Groq llama-3.3-70b ~$0.59 / $0.79 per 1M tokens (ordem de grandeza)
+  const costUsd =
+    (inputTokens / 1_000_000) * 0.59 + (outputTokens / 1_000_000) * 0.79;
+  const credits = Math.max(1, Math.ceil(input.questionCount * 0.8));
+
+  return {
+    estimatedCards: input.questionCount,
+    estimatedCredits: credits,
+    estimatedCostUsd: Number(costUsd.toFixed(4)),
+    model: input.model,
+    note: "Estimativa aproximada antes de confirmar. Edite as perguntas abaixo e confirme só o que quiser manter.",
+  };
 }

@@ -106,6 +106,5 @@ export type FsrsCardState = {
 
 export type AppUser = {
   id: string;
-  clerk_id: string;
   email: string | null;
 };
