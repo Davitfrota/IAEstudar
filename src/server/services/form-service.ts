@@ -1,14 +1,12 @@
 import {
-  createEmptyCard,
   fsrs,
   generatorParameters,
   Rating,
-  State,
-  type Card,
   type Grade,
 } from "ts-fsrs";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fromFsrsCard, toFsrsCard } from "@/server/fsrs-mapping";
 import { AppError } from "@/server/http";
 import { assertGenerateRateLimit } from "@/server/rate-limit";
 import { DocumentRepository } from "@/server/repositories/document-repository";
@@ -18,7 +16,7 @@ import type {
   GenerateFormInput,
   FsrsRating,
 } from "@/server/schemas";
-import type { FormQuestion, FsrsCardState } from "@/server/types";
+import type { FormQuestion } from "@/server/types";
 import {
   PROMPT_FLASHCARD_DECK,
   PROMPT_OPEN_FORM,
@@ -32,20 +30,6 @@ const ratingMap: Record<FsrsRating, Grade> = {
   hard: Rating.Hard,
   good: Rating.Good,
   easy: Rating.Easy,
-};
-
-const stateToDb: Record<State, FormQuestion["fsrs_state"]> = {
-  [State.New]: "new",
-  [State.Learning]: "learning",
-  [State.Review]: "review",
-  [State.Relearning]: "relearning",
-};
-
-const dbToState: Record<FormQuestion["fsrs_state"], State> = {
-  new: State.New,
-  learning: State.Learning,
-  review: State.Review,
-  relearning: State.Relearning,
 };
 
 function promptForType(type: FormType) {
@@ -68,38 +52,6 @@ function questionTypeForForm(type: FormType): FormQuestion["type"] {
     case "open_form":
       return "open";
   }
-}
-
-function toFsrsCard(q: FormQuestion): Card {
-  const empty = createEmptyCard(new Date(q.created_at));
-  return {
-    ...empty,
-    due: new Date(q.fsrs_due),
-    stability: q.fsrs_stability ?? empty.stability,
-    difficulty: q.fsrs_difficulty ?? empty.difficulty,
-    elapsed_days: q.fsrs_elapsed_days,
-    scheduled_days: q.fsrs_scheduled_days,
-    reps: q.fsrs_reps,
-    lapses: q.fsrs_lapses,
-    state: dbToState[q.fsrs_state],
-    last_review: q.fsrs_last_review
-      ? new Date(q.fsrs_last_review)
-      : undefined,
-  };
-}
-
-function fromFsrsCard(card: Card): FsrsCardState {
-  return {
-    state: stateToDb[card.state],
-    due: card.due.toISOString(),
-    stability: card.stability,
-    difficulty: card.difficulty,
-    elapsed_days: card.elapsed_days,
-    scheduled_days: card.scheduled_days,
-    reps: card.reps,
-    lapses: card.lapses,
-    last_review: card.last_review?.toISOString() ?? null,
-  };
 }
 
 type GeneratedQuestion = {
