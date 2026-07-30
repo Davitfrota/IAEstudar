@@ -208,6 +208,7 @@ export class FormRepository {
         fsrs_scheduled_days: state.scheduled_days,
         fsrs_reps: state.reps,
         fsrs_lapses: state.lapses,
+        fsrs_learning_steps: state.learning_steps,
         fsrs_last_review: state.last_review,
       })
       .eq("id", questionId)

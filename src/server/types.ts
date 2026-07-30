@@ -79,6 +79,7 @@ export type FormQuestion = {
   fsrs_scheduled_days: number;
   fsrs_reps: number;
   fsrs_lapses: number;
+  fsrs_learning_steps: number;
   fsrs_last_review: string | null;
   created_at: string;
   updated_at: string;
@@ -101,6 +102,8 @@ export type FsrsCardState = {
   scheduled_days: number;
   reps: number;
   lapses: number;
+  /** Índice do passo em learning/relearning (Card.learning_steps do ts-fsrs). */
+  learning_steps: number;
   last_review: string | null;
 };
 
