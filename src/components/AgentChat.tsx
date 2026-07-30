@@ -17,6 +17,7 @@ import {
   type ToolPlanPreview,
 } from "@/components/ToolPlanCard";
 import type { PreviewQuestion } from "@/components/FormQuestionPreviewEditor";
+import { stripLeakedToolMarkup } from "@/lib/ai/groq-tools";
 
 type ChatMessage = {
   id: string;
@@ -450,7 +451,9 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
                   : "bg-lavender"
               }`}
             >
-              <p className="whitespace-pre-wrap font-base">{m.content}</p>
+              <p className="whitespace-pre-wrap font-base">
+                {stripLeakedToolMarkup(m.content)}
+              </p>
               {m.toolPlan && m.toolPlan.planId !== activePlan?.planId ? (
                 <ToolPlanCard
                   plan={m.toolPlan}

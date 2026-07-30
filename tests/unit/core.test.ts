@@ -21,6 +21,11 @@ import {
   nameSchema,
 } from "@/server/schemas";
 import { extractConversationTitle } from "@/server/mcp/agent";
+import {
+  extractInlineToolCalls,
+  isGatheringPlanRequirements,
+  sanitizeToolCompletion,
+} from "@/lib/ai/groq-tools";
 
 describe("theme", () => {
   it("cycles neo → clay → glass → material → fluent → neo", () => {
@@ -48,6 +53,48 @@ describe("conversation title", () => {
       "Biologia Celular",
     );
     expect(extractConversationTitle("Sem título aqui")).toBeNull();
+  });
+});
+
+describe("groq inline tools", () => {
+  it("strips leaked <function=...> from assistant text", () => {
+    const raw = `Título: Biologia Celular — Introdução
+
+Olá! Qual é o objetivo?
+
+<function=propose_study_plan>{"folderName":"Biologia Celular","topics":["A"]}</function>`;
+
+    const { content, toolCalls } = extractInlineToolCalls(raw);
+    expect(content).toContain("Qual é o objetivo?");
+    expect(content).not.toContain("<function=");
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]?.name).toBe("propose_study_plan");
+    expect(toolCalls[0]?.input.folderName).toBe("Biologia Celular");
+  });
+
+  it("drops creation tools while gathering requirements", () => {
+    const text = `Título: Bio
+
+1. Objetivo?
+2. Prazo?
+3. Nível?`;
+    expect(isGatheringPlanRequirements(text)).toBe(true);
+
+    const result = sanitizeToolCompletion(text, [
+      {
+        id: "1",
+        name: "propose_study_plan",
+        arguments: "{}",
+        input: {},
+      },
+      {
+        id: "2",
+        name: "list_due",
+        arguments: "{}",
+        input: {},
+      },
+    ]);
+    expect(result.toolCalls.map((c) => c.name)).toEqual(["list_due"]);
   });
 });
 

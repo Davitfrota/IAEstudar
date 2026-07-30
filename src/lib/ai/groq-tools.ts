@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
 import { AppError } from "@/server/http";
+import { nanoid } from "nanoid";
 
 type Client = OpenAI;
 type Tools = OpenAI.Chat.ChatCompletionTool[];
@@ -42,6 +43,128 @@ function extractGroqError(err: unknown): {
   };
 }
 
+function parseArgs(raw: string): {
+  arguments: string;
+  input: Record<string, unknown>;
+} {
+  const trimmed = raw.trim();
+  try {
+    const input = JSON.parse(trimmed || "{}") as Record<string, unknown>;
+    return { arguments: trimmed || "{}", input };
+  } catch {
+    // tenta achar o primeiro objeto JSON embutido
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      const slice = trimmed.slice(start, end + 1);
+      try {
+        const input = JSON.parse(slice) as Record<string, unknown>;
+        return { arguments: slice, input };
+      } catch {
+        // fallthrough
+      }
+    }
+    return { arguments: "{}", input: {} };
+  }
+}
+
+/**
+ * Llama/Groq às vezes escreve a tool call no content:
+ * `<function=propose_study_plan>{...}</function>`
+ * em vez de preencher tool_calls. Extrai e remove do texto.
+ */
+export function extractInlineToolCalls(content: string): {
+  content: string;
+  toolCalls: ParsedToolCall[];
+} {
+  if (!content) return { content: "", toolCalls: [] };
+
+  const toolCalls: ParsedToolCall[] = [];
+  let cleaned = content;
+
+  const patterns: RegExp[] = [
+    /<function\s*=\s*([a-zA-Z0-9_]+)\s*>\s*([\s\S]*?)\s*<\/function>/gi,
+    /<function\s*=\s*([a-zA-Z0-9_]+)\s*>\s*(\{[\s\S]*?\})\s*(?:<\/function>)?/gi,
+    /```(?:tool|json)?\s*\n?\s*\{\s*"name"\s*:\s*"([a-zA-Z0-9_]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}\s*```/gi,
+  ];
+
+  for (const pattern of patterns) {
+    cleaned = cleaned.replace(pattern, (_full, name: string, argsRaw: string) => {
+      const { arguments: args, input } = parseArgs(String(argsRaw ?? "{}"));
+      if (name) {
+        toolCalls.push({
+          id: `inline_${nanoid(8)}`,
+          name: String(name),
+          arguments: args,
+          input,
+        });
+      }
+      return "";
+    });
+  }
+
+  // residual: tag aberta sem fechamento no fim do texto
+  cleaned = cleaned.replace(
+    /<function\s*=\s*[a-zA-Z0-9_]+\s*>[\s\S]*$/gi,
+    "",
+  );
+  cleaned = cleaned.replace(/<\/?function[^>]*>/gi, "");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+
+  return { content: cleaned, toolCalls };
+}
+
+/** Remove vazamentos de tool call do texto (para UI / histórico antigo). */
+export function stripLeakedToolMarkup(content: string): string {
+  return extractInlineToolCalls(content).content;
+}
+
+/** True se a Nara ainda está coletando objetivo/prazo/nível (não deve gerar plano). */
+export function isGatheringPlanRequirements(content: string): boolean {
+  const text = content.toLowerCase();
+  const asksObjective = /objetivo/.test(text);
+  const asksDeadline = /prazo|data|at[eé]\s+quando|quando\s+(?:quer|precisa)/.test(
+    text,
+  );
+  const asksLevel = /n[ií]vel/.test(text);
+  const asks = [asksObjective, asksDeadline, asksLevel].filter(Boolean).length;
+  return asks >= 2 && /\?/.test(content);
+}
+
+const CREATION_TOOLS = new Set([
+  "propose_study_plan",
+  "create_folder",
+  "create_document",
+  "update_document",
+  "generate_schedule",
+  "generate_form",
+]);
+
+/**
+ * Limpa content vazado + mescla tool_calls; descarta criação se ainda está perguntando requisitos.
+ */
+export function sanitizeToolCompletion(
+  content: string,
+  apiToolCalls: ParsedToolCall[],
+): { content: string; toolCalls: ParsedToolCall[] } {
+  const inline = extractInlineToolCalls(content);
+  const byName = new Map<string, ParsedToolCall>();
+
+  for (const call of [...apiToolCalls, ...inline.toolCalls]) {
+    if (!call.name) continue;
+    if (!byName.has(call.name)) byName.set(call.name, call);
+  }
+
+  let toolCalls = [...byName.values()];
+  const cleanContent = inline.content;
+
+  if (isGatheringPlanRequirements(cleanContent)) {
+    toolCalls = toolCalls.filter((c) => !CREATION_TOOLS.has(c.name));
+  }
+
+  return { content: cleanContent, toolCalls };
+}
+
 /**
  * Completions com tools no Groq: sem stream, temp baixa, retry se tool_use_failed.
  * Evita parallel_tool_calls no retry (Llama costuma quebrar com várias tools).
@@ -77,16 +200,19 @@ export async function groqToolCompletion(opts: {
       });
 
       const msg = completion.choices[0]?.message;
-      const content = msg?.content ?? "";
+      const rawContent = msg?.content ?? "";
       const rawCalls = msg?.tool_calls ?? [];
 
-      const toolCalls: ParsedToolCall[] = rawCalls
+      const apiToolCalls: ParsedToolCall[] = rawCalls
         .filter(
-          (call): call is OpenAI.Chat.ChatCompletionMessageToolCall & {
+          (
+            call,
+          ): call is OpenAI.Chat.ChatCompletionMessageToolCall & {
             type?: "function";
             function: { name?: string; arguments?: string };
           } =>
-            "function" in call && Boolean((call as { function?: unknown }).function),
+            "function" in call &&
+            Boolean((call as { function?: unknown }).function),
         )
         .map((call) => {
           let name = call.function?.name ?? "";
@@ -99,23 +225,17 @@ export async function groqToolCompletion(opts: {
             args = `{${rest ?? ""}`;
           }
 
-          let input: Record<string, unknown> = {};
-          try {
-            input = JSON.parse(args || "{}") as Record<string, unknown>;
-          } catch {
-            input = {};
-          }
-
+          const parsed = parseArgs(args);
           return {
             id: call.id,
             name,
-            arguments: args,
-            input,
+            arguments: parsed.arguments,
+            input: parsed.input,
           };
         })
         .filter((c) => c.name);
 
-      return { content, toolCalls };
+      return sanitizeToolCompletion(rawContent, apiToolCalls);
     } catch (err) {
       lastError = err;
       const parsed = extractGroqError(err);
