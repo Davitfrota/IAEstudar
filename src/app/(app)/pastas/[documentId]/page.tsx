@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { DocumentEditor } from "@/components/DocumentEditor";
+import { createSerialSaver } from "@/lib/serial-save";
 
 type Document = {
   id: string;
@@ -17,6 +18,32 @@ export default function DocumentPage() {
   const [document, setDocument] = useState<Document | null>(null);
   const [isStale, setIsStale] = useState(false);
   const [loading, setLoading] = useState(true);
+  const documentIdRef = useRef<string | null>(null);
+  documentIdRef.current = document?.id ?? null;
+
+  const saveDocument = useRef(
+    createSerialSaver<{
+      content: unknown;
+      contentText: string;
+      title?: string;
+    }>(async ({ content, contentText, title }) => {
+      const id = documentIdRef.current;
+      if (!id) return;
+      const res = await fetch(`/api/documents/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, contentText, title }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error?.message ?? "Falha ao salvar");
+        return;
+      }
+      if (documentIdRef.current !== id) return;
+      setDocument(json.data.document);
+      toast.success("Documento salvo");
+    }),
+  ).current;
 
   useEffect(() => {
     const load = async () => {
@@ -60,19 +87,8 @@ export default function DocumentPage() {
     <DocumentEditor
       document={document}
       isStale={isStale}
-      onChange={async ({ content, contentText, title }) => {
-        const res = await fetch(`/api/documents/${document.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, contentText, title }),
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          toast.error(json.error?.message ?? "Falha ao salvar");
-          return;
-        }
-        setDocument(json.data.document);
-        toast.success("Documento salvo");
+      onChange={(payload) => {
+        void saveDocument(payload);
       }}
     />
   );

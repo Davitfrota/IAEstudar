@@ -8,6 +8,10 @@ import "@blocknote/core/fonts/inter.css";
 import "@mantine/core/styles.css";
 import "@blocknote/mantine/style.css";
 import type { Block } from "@blocknote/core";
+import {
+  mergeDocumentDraft,
+  type DocumentDraft,
+} from "@/lib/document-draft";
 
 type Document = {
   id: string;
@@ -32,31 +36,43 @@ function blocksFromDocument(content: unknown): Block[] | undefined {
     : undefined;
 }
 
+function draftFromDocument(document: Document): DocumentDraft {
+  return {
+    content: document.content,
+    contentText: document.content_text,
+    title: document.title,
+  };
+}
+
 function EditorBody({ document, onChange, isStale }: Props) {
   const [title, setTitle] = useState(document.title);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latest = useRef(document);
-  latest.current = document;
+  const draft = useRef<DocumentDraft>(draftFromDocument(document));
 
   const editor = useCreateBlockNote({
     initialContent: blocksFromDocument(document.content),
   });
 
   useEffect(() => {
+    draft.current = draftFromDocument(document);
     setTitle(document.title);
-  }, [document.id, document.title]);
+  }, [document.id]);
 
-  const scheduleSave = (payload: {
-    content?: unknown;
-    contentText?: string;
-    title?: string;
-  }) => {
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
+  const scheduleSave = (payload: Partial<DocumentDraft>) => {
+    draft.current = mergeDocumentDraft(draft.current, payload);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
+      const next = draft.current;
       onChange({
-        content: payload.content ?? latest.current.content,
-        contentText: payload.contentText ?? latest.current.content_text,
-        title: payload.title ?? title,
+        content: next.content,
+        contentText: next.contentText,
+        title: next.title,
       });
     }, 700);
   };
