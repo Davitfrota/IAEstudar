@@ -70,7 +70,7 @@ export const mcpToolDefinitions = [
   {
     name: "propose_study_plan",
     description:
-      "PREFIRA esta tool quando o usuário pedir setup completo de estudo. Cria pasta do tema + resumo geral + arquivos por tópico OU por dia + cronograma (todos os dias até a data) + flashcards opcionais. Uma única chamada.",
+      "PREFIRA esta tool quando o usuário pedir setup completo de estudo. Cria pasta raiz + resumo + subpastas por tópico + sessões (plano do dia com links/notas) + cronograma + flashcards do curso e quiz do dia. Uma única chamada.",
     inputSchema: {
       type: "object",
       properties: {
@@ -78,7 +78,8 @@ export const mcpToolDefinitions = [
         documentTitle: { type: "string" },
         documentContent: {
           type: "string",
-          description: "Resumo de estudo com ≥50 caracteres",
+          description:
+            "Resumo COMPLETO e condensado do curso (≥500 caracteres), cobrindo todos os tópicos",
         },
         scheduleTitle: { type: "string" },
         topics: { type: "array", items: { type: "string" } },
@@ -98,12 +99,12 @@ export const mcpToolDefinitions = [
           type: "string",
           enum: ["by_topic", "by_day"],
           description:
-            "by_topic = um arquivo por tópico; by_day = um arquivo por dia de estudo. Default by_topic.",
+            "by_topic = pasta por tópico com sessões diárias dentro (default); by_day = pasta Sessões com um plano por dia.",
         },
         lessonNotes: {
           type: "array",
           description:
-            "Conteúdo de cada arquivo extra (além do resumo). Em by_topic: um por tópico. Em by_day: um por dia.",
+            "Conteúdo didático de cada sessão (≥400 chars cada): definição, mecanismo, exemplo, erro comum. Não use uma frase sola.",
           items: {
             type: "object",
             properties: {

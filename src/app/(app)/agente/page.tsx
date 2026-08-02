@@ -60,7 +60,16 @@ export default function AgentePage() {
         onConversationsInvalidate={() => {
           void loadConversations();
         }}
-        onToolExecuted={(tool) => {
+        onToolExecuted={(tool, meta) => {
+          if (meta?.ok === false) {
+            if (tool === "tool_plan") {
+              toast.error("Plano com falha — use Retomar se ainda estiver ativo");
+            } else {
+              toast.error(`Falha em ${tool}`);
+            }
+            void loadConversations();
+            return;
+          }
           if (tool === "create_document") toast.success("Documento criado");
           if (tool === "update_document") toast.success("Documento atualizado");
           if (tool === "generate_schedule") toast.success("Cronograma gerado");

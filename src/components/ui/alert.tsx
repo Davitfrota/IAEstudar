@@ -42,7 +42,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "font-heading uppercase leading-none tracking-tight",
+        "col-start-2 font-heading uppercase leading-none tracking-tight",
         className,
       )}
       {...props}

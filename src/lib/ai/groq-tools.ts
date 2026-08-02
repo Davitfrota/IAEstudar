@@ -131,6 +131,31 @@ export function isGatheringPlanRequirements(content: string): boolean {
   return asks >= 2 && /\?/.test(content);
 }
 
+/** Extrai sinais de intake do histórico user+assistant. */
+export function hasPlanRequirementsInHistory(
+  messages: { role: string; content: string }[],
+): boolean {
+  const userText = messages
+    .filter((m) => m.role === "user")
+    .map((m) => m.content.toLowerCase())
+    .join("\n");
+
+  const hasObjective =
+    /estudar|prova|concurso|aprender|mat[eé]ria|disciplina|objetivo|quero/.test(
+      userText,
+    ) && userText.trim().length >= 12;
+  const hasDeadline =
+    /\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}|\b(semana|semanas|dia|dias|m[eê]s|meses)\b|prazo|at[eé]\s/.test(
+      userText,
+    );
+  const hasLevel =
+    /iniciante|intermedi[aá]rio|avan[cç]ado|b[aá]sico|n[ií]vel|zero|nunca estudei/.test(
+      userText,
+    );
+
+  return hasObjective && hasDeadline && hasLevel;
+}
+
 const CREATION_TOOLS = new Set([
   "propose_study_plan",
   "create_folder",
@@ -142,10 +167,12 @@ const CREATION_TOOLS = new Set([
 
 /**
  * Limpa content vazado + mescla tool_calls; descarta criação se ainda está perguntando requisitos.
+ * `historyComplete` = objetivo+prazo+nível já no histórico do usuário.
  */
 export function sanitizeToolCompletion(
   content: string,
   apiToolCalls: ParsedToolCall[],
+  opts?: { historyComplete?: boolean },
 ): { content: string; toolCalls: ParsedToolCall[] } {
   const inline = extractInlineToolCalls(content);
   const byName = new Map<string, ParsedToolCall>();
@@ -158,7 +185,12 @@ export function sanitizeToolCompletion(
   let toolCalls = [...byName.values()];
   const cleanContent = inline.content;
 
-  if (isGatheringPlanRequirements(cleanContent)) {
+  const gathering =
+    isGatheringPlanRequirements(cleanContent) ||
+    (opts?.historyComplete === false &&
+      toolCalls.some((c) => c.name === "propose_study_plan"));
+
+  if (gathering) {
     toolCalls = toolCalls.filter((c) => !CREATION_TOOLS.has(c.name));
   }
 
@@ -174,6 +206,8 @@ export async function groqToolCompletion(opts: {
   model: string;
   messages: Messages;
   tools: Tools;
+  /** Se false, bloqueia propose_study_plan mesmo sem pergunta no content. */
+  historyComplete?: boolean;
 }): Promise<{
   content: string;
   toolCalls: ParsedToolCall[];
@@ -235,7 +269,9 @@ export async function groqToolCompletion(opts: {
         })
         .filter((c) => c.name);
 
-      return sanitizeToolCompletion(rawContent, apiToolCalls);
+      return sanitizeToolCompletion(rawContent, apiToolCalls, {
+        historyComplete: opts.historyComplete,
+      });
     } catch (err) {
       lastError = err;
       const parsed = extractGroqError(err);

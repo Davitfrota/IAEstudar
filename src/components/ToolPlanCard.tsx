@@ -44,6 +44,8 @@ function PlanBody({
   setEditNote,
   canAccept,
   remainingMin,
+  remainingSec,
+  doneSteps,
   disabled,
   onConfirm,
   onCancel,
@@ -56,6 +58,8 @@ function PlanBody({
   setEditNote: (v: string) => void;
   canAccept: boolean;
   remainingMin: number;
+  remainingSec: number;
+  doneSteps: number;
   disabled?: boolean;
   onConfirm: (draftQuestions?: PreviewQuestion[]) => void;
   onCancel: () => void;
@@ -67,8 +71,14 @@ function PlanBody({
         <p className="font-heading text-sm uppercase">{plan.summary}</p>
         <p className="text-xs opacity-70">
           {plan.status === "awaiting_confirmation"
-            ? `Expira em ~${remainingMin} min`
-            : plan.status}
+            ? remainingMin <= 0
+              ? "Expirado — peça um plano novo no chat"
+              : remainingSec > 90
+                ? `Expira em ~${remainingMin} min`
+                : `Expira em ${remainingSec}s`
+            : plan.status === "executing"
+              ? `Executando… passo ${doneSteps + 1}/${plan.steps.length || 1}`
+              : plan.status}
         </p>
       </div>
 
@@ -135,11 +145,16 @@ function PlanBody({
       ) : null}
 
       {plan.status === "awaiting_confirmation" && questions.length === 0 ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="space-y-2">
+          <p className="text-xs opacity-70">
+            Os quizzes do dia são gerados na confirmação (até 7 primeiros dias).
+            Flashcards gerais entram no resumo do curso.
+          </p>
+          <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             size="sm"
-            disabled={disabled || !canAccept}
+            disabled={disabled || !canAccept || remainingMin <= 0}
             onClick={() => onConfirm()}
           >
             Confirmar plano
@@ -153,6 +168,7 @@ function PlanBody({
           >
             Cancelar
           </Button>
+          </div>
         </div>
       ) : null}
 
@@ -191,9 +207,19 @@ function PlanBody({
       ) : null}
 
       {plan.status === "error" ? (
-        <p className="text-sm text-black">
-          Alguns passos falharam — peça retry só do que faltou.
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm text-black">
+            Alguns passos falharam — você pode retomar só o que faltou.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            disabled={disabled}
+            onClick={() => onConfirm(questions.length ? questions : undefined)}
+          >
+            Retomar
+          </Button>
+        </div>
       ) : null}
 
       <p className="text-[10px] opacity-60">
@@ -218,10 +244,36 @@ export function ToolPlanCard({
   );
   const [editNote, setEditNote] = useState("");
   const [isMobile, setIsMobile] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     setLivePlan(planProp);
   }, [planProp]);
+
+  useEffect(() => {
+    if (
+      planProp.status !== "awaiting_confirmation" &&
+      planProp.status !== "error"
+    ) {
+      return;
+    }
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [planProp.status, planProp.planId]);
+
+  useEffect(() => {
+    if (
+      planProp.status === "awaiting_confirmation" &&
+      planProp.expiresAt <= now
+    ) {
+      setLivePlan((prev) => {
+        if (prev.status === "expired") return prev;
+        const expired = { ...prev, status: "expired" as const };
+        onPlanChange?.(expired);
+        return expired;
+      });
+    }
+  }, [now, planProp.status, planProp.expiresAt, onPlanChange]);
 
   useEffect(() => {
     setQuestions(planProp.draftQuestions ?? []);
@@ -272,8 +324,10 @@ export function ToolPlanCard({
     return questions.every((q) => q.prompt.trim() && q.answer.trim());
   }, [questions]);
 
-  const remainingMs = Math.max(0, plan.expiresAt - Date.now());
+  const remainingMs = Math.max(0, plan.expiresAt - now);
   const remainingMin = Math.ceil(remainingMs / 60000);
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  const doneSteps = plan.steps.filter((s) => s.status === "done").length;
 
   const bodyProps = {
     plan,
@@ -283,6 +337,8 @@ export function ToolPlanCard({
     setEditNote,
     canAccept,
     remainingMin,
+    remainingSec,
+    doneSteps,
     disabled,
     onConfirm,
     onCancel,
@@ -291,18 +347,14 @@ export function ToolPlanCard({
 
   const asSheet =
     isMobile &&
-    (plan.status === "awaiting_confirmation" || plan.status === "executing");
+    (plan.status === "awaiting_confirmation" ||
+      plan.status === "executing" ||
+      plan.status === "error");
 
   if (asSheet) {
     return (
       <>
-        <div
-          className="fixed inset-0 z-40 bg-black/40"
-          aria-hidden
-          onClick={() => {
-            if (plan.status === "awaiting_confirmation" && !disabled) onCancel();
-          }}
-        />
+        <div className="fixed inset-0 z-40 bg-black/40" aria-hidden />
         <div
           role="dialog"
           aria-modal="true"

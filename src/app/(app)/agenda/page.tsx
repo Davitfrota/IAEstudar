@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
 import {
@@ -13,20 +14,11 @@ import { NeoBarChart } from "@/components/ui/neo-bar-chart";
 import { useRealtimeRefresh } from "@/hooks/useRealtimeRefresh";
 
 export default function AgendaPage() {
+  const router = useRouter();
   const [items, setItems] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<CalendarView>("month");
   const [cursor, setCursor] = useState(() => new Date());
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const apply = () => {
-      if (mq.matches && view === "week") setView("month");
-    };
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, [view]);
 
   const load = useCallback(async () => {
     try {
@@ -115,7 +107,6 @@ export default function AgendaPage() {
               key={v.id}
               variant={view === v.id ? "default" : "neutral"}
               size="sm"
-              className={v.id === "week" ? "hidden md:inline-flex" : undefined}
               onClick={() => setView(v.id)}
             >
               {v.label}
@@ -129,7 +120,9 @@ export default function AgendaPage() {
       ) : items.length === 0 ? (
         <EmptyState
           title="Nenhuma sessão ainda"
-          description="Peça um cronograma no agente com tópicos e data-alvo."
+          description="Peça à Nara um cronograma com tópicos e data-alvo."
+          href="/agente"
+          actionLabel="Falar com a Nara"
         />
       ) : (
         <>
@@ -147,11 +140,15 @@ export default function AgendaPage() {
             cursor={cursor}
             onCursorChange={setCursor}
             onViewChange={setView}
-            onItemClick={(item) =>
+            onItemClick={(item) => {
+              if (item.document_id) {
+                router.push(`/pastas/${item.document_id}`);
+                return;
+              }
               toast.message(item.topic ?? "Sessão", {
                 description: `${item.scheduled_date} · ${item.duration_minutes} min`,
-              })
-            }
+              });
+            }}
             onReschedule={(itemId, newDate) =>
               void patchItem(itemId, { scheduledDate: newDate })
             }

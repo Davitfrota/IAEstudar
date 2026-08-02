@@ -1,5 +1,6 @@
 import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
+import { markdownToBlockNote } from "@/server/markdown-to-blocks";
 import { DocumentRepository } from "@/server/repositories/document-repository";
 import { FolderRepository } from "@/server/repositories/folder-repository";
 import type {
@@ -69,12 +70,7 @@ export class DocumentService {
     const content =
       input.content ??
       (input.initialContent
-        ? [
-            {
-              type: "paragraph",
-              content: [{ type: "text", text: input.initialContent }],
-            },
-          ]
+        ? markdownToBlockNote(input.initialContent)
         : []);
 
     return (await this.repo()).create(userId, {

@@ -106,7 +106,19 @@ type GeneratedQuestion = {
   prompt: string;
   answer: string;
   choices?: string[];
+  kind?: "qa" | "multiple_choice" | "open" | "cloze";
 };
+
+function resolveQuestionType(
+  formType: FormType,
+  q: GeneratedQuestion,
+): FormQuestion["type"] {
+  if (q.kind === "multiple_choice" || q.kind === "open" || q.kind === "qa" || q.kind === "cloze") {
+    return q.kind;
+  }
+  if (q.choices && q.choices.length >= 2) return "multiple_choice";
+  return questionTypeForForm(formType);
+}
 
 export class FormService {
   private scheduler = fsrs(generatorParameters({ enable_fuzz: true }));
@@ -173,8 +185,6 @@ export class FormService {
   }
 
   async previewGenerate(userId: string, input: GenerateFormInput) {
-    await assertGenerateRateLimit(userId, "generate_form");
-
     const doc = await (await this.documents()).getOwned(
       userId,
       input.sourceDocumentId,
@@ -256,13 +266,13 @@ export class FormService {
       title: `${doc.title} — ${input.type}`,
       type: input.type,
       generationInstruction: input.instruction,
+      scheduleItemId: input.scheduleItemId ?? null,
     });
 
-    const qType = questionTypeForForm(input.type);
     const created = await forms.createQuestions(
       questions.map((q, index) => ({
         form_id: form.id,
-        type: qType,
+        type: resolveQuestionType(input.type, q),
         prompt: q.prompt,
         answer: q.answer,
         choices: q.choices ?? null,
@@ -272,6 +282,57 @@ export class FormService {
 
     return {
       formId: form.id,
+      questionsCreated: created.length,
+    };
+  }
+
+  async regenerate(userId: string, formId: string) {
+    await assertGenerateRateLimit(userId, "generate_form");
+
+    const form = await this.get(userId, formId);
+    const doc = await (await this.documents()).getOwned(
+      userId,
+      form.source_document_id,
+    );
+    if (!doc) {
+      throw new AppError("Documento não encontrado", 404, "DOCUMENT_NOT_FOUND");
+    }
+    if (doc.content_text.trim().length < MIN_CONTENT_LENGTH) {
+      throw new AppError(
+        `Documento precisa ter pelo menos ${MIN_CONTENT_LENGTH} caracteres em content_text`,
+        400,
+        "DOCUMENT_TOO_SHORT",
+      );
+    }
+
+    const forms = await this.forms();
+    const existing = await forms.listQuestions(formId);
+    const questionCount = Math.max(existing.length, 10);
+
+    const questions = await this.generateQuestionsWithAi({
+      type: form.type,
+      instruction:
+        form.generation_instruction ??
+        "Regenerar questões a partir do documento atualizado",
+      contentText: doc.content_text,
+      questionCount,
+    });
+
+    await forms.softDeleteQuestions(formId);
+    const created = await forms.createQuestions(
+      questions.map((q, index) => ({
+        form_id: formId,
+        type: resolveQuestionType(form.type, q),
+        prompt: q.prompt,
+        answer: q.answer,
+        choices: q.choices ?? null,
+        position: index,
+      })),
+    );
+    await forms.clearStale(userId, formId);
+
+    return {
+      formId,
       questionsCreated: created.length,
     };
   }
@@ -307,8 +368,8 @@ export class FormService {
             "Conteúdo do documento:",
             input.contentText.slice(0, 12000),
             "",
-            'Responda APENAS com JSON: {"questions":[{"prompt":"...","answer":"...","choices":["..."]}]}',
-            "choices só para quiz (múltipla escolha).",
+            'Responda APENAS com JSON: {"questions":[{"kind":"multiple_choice"|"open"|"qa","prompt":"...","answer":"...","choices":["..."]}]}',
+            "choices obrigatório para multiple_choice (4 opções).",
           ].join("\n"),
         },
       ],

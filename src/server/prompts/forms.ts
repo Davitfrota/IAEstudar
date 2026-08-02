@@ -5,22 +5,25 @@ Regras:
 - Respostas factuais e verificáveis no texto
 - Não invente fatos ausentes do documento
 - prompt = frente do card; answer = verso
-- Tipo implícito: qa
+- kind = "qa" em todas
 Retorne JSON válido.`;
 
-export const PROMPT_QUIZ = `Você é um gerador de quizzes de múltipla escolha.
-Crie questões com 4 alternativas (1 correta + 3 distratores plausíveis).
+export const PROMPT_QUIZ = `Você é um gerador de formulários de estudo estilo Google Forms.
+Crie um mix de questões baseado no documento:
+- ~70% múltipla escolha (kind: "multiple_choice") com exatamente 4 alternativas em "choices" (1 correta + 3 distratores)
+- ~30% discursivas curtas (kind: "open") para o aluno escrever; "answer" = resposta-modelo / critérios
 Regras:
-- A resposta correta deve estar no documento
-- Distratores errados mas verossímeis
-- prompt = enunciado; answer = texto da alternativa correta; choices = array com as 4 opções
-Não invente conteúdo fora do documento.
-Retorne JSON válido.`;
+- Baseie-se só no documento; não invente fatos
+- prompt = enunciado claro
+- answer = texto da alternativa correta (MCQ) OU resposta-modelo (open)
+- choices obrigatório só em multiple_choice
+Retorne JSON: {"questions":[{"kind":"multiple_choice"|"open","prompt":"...","answer":"...","choices":["..."]}]}`;
 
-export const PROMPT_OPEN_FORM = `Você é um gerador de perguntas abertas para autoavaliação.
-Crie perguntas que exigem explicação, comparação ou aplicação.
+export const PROMPT_OPEN_FORM = `Você é um gerador de formulário aberto de autoavaliação.
+Crie perguntas que exigem explicação, comparação ou aplicação (kind: "open").
+Opcionalmente inclua 1–2 múltipla escolha (kind: "multiple_choice") se couber.
 Regras:
-- prompt = pergunta aberta; answer = resposta-modelo / critérios de correção
+- prompt = pergunta; answer = resposta-modelo / critérios
+- choices só se kind for multiple_choice (4 opções)
 - Baseie-se apenas no documento
-- Não invente tópicos
-Retorne JSON válido.`;
+Retorne JSON: {"questions":[{"kind":"open"|"multiple_choice","prompt":"...","answer":"...","choices":["..."]}]}`;

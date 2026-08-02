@@ -34,10 +34,10 @@ const ratings: {
   shortcut: string;
   color: string;
 }[] = [
-  { rating: "again", label: "Again", shortcut: "1", color: "var(--chart-2)" },
-  { rating: "hard", label: "Hard", shortcut: "2", color: "var(--chart-3)" },
-  { rating: "good", label: "Good", shortcut: "3", color: "var(--chart-4)" },
-  { rating: "easy", label: "Easy", shortcut: "4", color: "var(--chart-1)" },
+  { rating: "again", label: "De novo", shortcut: "1", color: "var(--chart-2)" },
+  { rating: "hard", label: "Difícil", shortcut: "2", color: "var(--chart-3)" },
+  { rating: "good", label: "Bom", shortcut: "3", color: "var(--chart-4)" },
+  { rating: "easy", label: "Fácil", shortcut: "4", color: "var(--chart-1)" },
 ];
 
 const SWIPE_THRESHOLD = 72;
@@ -51,6 +51,7 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
   );
   const [dragX, setDragX] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -64,16 +65,23 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
   const handleRate = async (rating: FsrsRating) => {
     if (!current || pending || !revealed) return;
     setPending(true);
-    setQueue((q) => q.filter((item) => item.id !== current.id));
-    setRevealed(false);
-    setDragX(0);
-    setStats((s) => ({
-      ...s,
-      reviewed: s.reviewed + 1,
-      [rating]: s[rating] + 1,
-    }));
+    setErrorMsg(null);
+    const questionId = current.id;
     try {
-      await onRate(current.id, rating);
+      await onRate(questionId, rating);
+      setQueue((q) => q.filter((item) => item.id !== questionId));
+      setRevealed(false);
+      setDragX(0);
+      setStats((s) => ({
+        ...s,
+        reviewed: s.reviewed + 1,
+        [rating]: s[rating] + 1,
+      }));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Falha ao registrar revisão";
+      setErrorMsg(message);
+      window.setTimeout(() => setErrorMsg(null), 3500);
     } finally {
       setPending(false);
     }
@@ -156,8 +164,8 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
       <div className="space-y-2 text-center">
         <p className="font-heading text-xl uppercase">Sessão concluída</p>
         <p className="text-sm opacity-80">
-          Revisados {stats.reviewed} · again {stats.again} · hard {stats.hard} ·
-          good {stats.good} · easy {stats.easy}
+          Revisados {stats.reviewed} · de novo {stats.again} · difícil{" "}
+          {stats.hard} · bom {stats.good} · fácil {stats.easy}
         </p>
       </div>
     );
@@ -169,9 +177,9 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
 
   const swipeHint =
     dragX <= -SWIPE_THRESHOLD / 2
-      ? "Again"
+      ? "De novo"
       : dragX >= SWIPE_THRESHOLD / 2
-        ? "Good"
+        ? "Bom"
         : null;
 
   const rotate = Math.max(-8, Math.min(8, dragX / 24));
@@ -183,7 +191,7 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
           {queue.length} restantes · {stats.reviewed} feitos
         </p>
         <p className="text-xs opacity-60">
-          Espaço = virar · 1–4 = rating · swipe ← again / → good
+          Espaço = virar · 1–4 = rating · swipe ← de novo / → bom
         </p>
       </div>
 
@@ -201,11 +209,11 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
         {swipeHint && revealed ? (
           <p
             className={`pointer-events-none absolute top-3 z-10 font-heading text-lg uppercase ${
-              swipeHint === "Again" ? "left-3" : "right-3"
+              swipeHint === "De novo" ? "left-3" : "right-3"
             }`}
             style={{
               color:
-                swipeHint === "Again" ? "var(--chart-2)" : "var(--chart-4)",
+                swipeHint === "De novo" ? "var(--chart-2)" : "var(--chart-4)",
             }}
           >
             {swipeHint}
@@ -246,6 +254,10 @@ export function PracticeQueue({ questions, onRate, sessionStats }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      {errorMsg ? (
+        <p className="text-center text-sm text-[var(--chart-2)]">{errorMsg}</p>
+      ) : null}
 
       {revealed ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

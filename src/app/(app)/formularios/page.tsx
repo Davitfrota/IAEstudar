@@ -21,6 +21,7 @@ export default function FormulariosPage() {
   const [forms, setForms] = useState<Form[]>([]);
   const [dueCount, setDueCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +36,30 @@ export default function FormulariosPage() {
       setLoading(false);
     }
   }, []);
+
+  const regenerate = async (formId: string) => {
+    const confirmed = window.confirm(
+      "Regenerar apaga o progresso de repetição espaçada deste formulário. Deseja continuar?",
+    );
+    if (!confirmed) return;
+
+    setRegenerating(formId);
+    try {
+      const res = await fetch(`/api/forms/${formId}/regenerate`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error?.message ?? "Erro");
+      toast.success(
+        `Regenerado (${json.data.questionsCreated as number} questões)`,
+      );
+      void load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha");
+    } finally {
+      setRegenerating(null);
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -63,15 +88,24 @@ export default function FormulariosPage() {
     ];
   }, [forms]);
 
+  const firstFormId = forms[0]?.id;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-heading text-3xl uppercase">Formulários</h1>
-        <p className="font-heading text-sm uppercase text-main">
-          {dueCount > 0
-            ? `${dueCount} cards due agora`
-            : "Tudo revisado por hoje"}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-heading text-3xl uppercase">Formulários</h1>
+          <p className="font-heading text-sm uppercase text-main">
+            {dueCount > 0
+              ? `${dueCount} para revisar agora`
+              : "Tudo revisado por hoje"}
+          </p>
+        </div>
+        {dueCount > 0 && firstFormId ? (
+          <Link href={`/formularios/${firstFormId}/practice`}>
+            <Button size="sm">Começar revisão</Button>
+          </Link>
+        ) : null}
       </div>
 
       {loading ? (
@@ -79,7 +113,9 @@ export default function FormulariosPage() {
       ) : forms.length === 0 ? (
         <EmptyState
           title="Nenhum formulário ainda"
-          description="Peça ao agente para gerar flashcards, quiz ou perguntas abertas."
+          description="Peça à Nara flashcards, quiz ou perguntas abertas a partir dos seus documentos."
+          href="/agente"
+          actionLabel="Falar com a Nara"
         />
       ) : (
         <>
@@ -103,9 +139,21 @@ export default function FormulariosPage() {
                       {form.is_stale ? " · desatualizado" : ""}
                     </p>
                   </div>
-                  <Link href={`/formularios/${form.id}/practice`}>
-                    <Button size="sm">Praticar</Button>
-                  </Link>
+                  <div className="flex flex-wrap gap-2">
+                    {form.is_stale ? (
+                      <Button
+                        size="sm"
+                        variant="neutral"
+                        disabled={regenerating === form.id}
+                        onClick={() => void regenerate(form.id)}
+                      >
+                        {regenerating === form.id ? "..." : "Regenerar"}
+                      </Button>
+                    ) : null}
+                    <Link href={`/formularios/${form.id}/practice`}>
+                      <Button size="sm">Praticar</Button>
+                    </Link>
+                  </div>
                 </li>
               ))}
             </ul>

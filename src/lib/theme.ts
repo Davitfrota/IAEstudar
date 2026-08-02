@@ -6,27 +6,37 @@ export const THEME_STORAGE_KEY = "ia-estudar-theme";
 
 export const THEME_META: Record<
   ThemeId,
-  { label: string; badgeClass: string }
+  { label: string; badgeClass: string; mascot: string; mascotThinking: string }
 > = {
   neo: {
     label: "Neo",
     badgeClass: "bg-baby-blue text-foreground",
+    mascot: "/nara/head-neo.png",
+    mascotThinking: "/nara/head-neo-thinking.png",
   },
   clay: {
     label: "Clay",
     badgeClass: "bg-peach text-foreground",
+    mascot: "/nara/head-clay.png",
+    mascotThinking: "/nara/head-clay-thinking.png",
   },
   glass: {
     label: "Glass",
     badgeClass: "bg-mint text-foreground",
+    mascot: "/nara/head-glass.png",
+    mascotThinking: "/nara/head-glass-thinking.png",
   },
   material: {
     label: "Material",
     badgeClass: "bg-lavender text-foreground",
+    mascot: "/nara/head-material.png",
+    mascotThinking: "/nara/head-material-thinking.png",
   },
   fluent: {
     label: "Fluent",
     badgeClass: "bg-butter text-foreground",
+    mascot: "/nara/head-fluent.png",
+    mascotThinking: "/nara/head-fluent-thinking.png",
   },
 };
 

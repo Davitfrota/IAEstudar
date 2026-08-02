@@ -535,3 +535,311 @@
   color: var(--foreground) !important;
   backdrop-filter: blur(20px);
 }
+
+/* ===== Chat Markdown (todos os temas) ===== */
+.chat-md {
+  color: inherit;
+  word-break: break-word;
+}
+
+.chat-md > *:first-child {
+  margin-top: 0;
+}
+
+.chat-md > *:last-child {
+  margin-bottom: 0;
+}
+
+.chat-md p {
+  margin: 0.45em 0;
+}
+
+.chat-md h1,
+.chat-md h2,
+.chat-md h3,
+.chat-md h4 {
+  font-family: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  margin: 0.75em 0 0.35em;
+}
+
+.chat-md h1 {
+  font-size: 1.15rem;
+  text-transform: uppercase;
+}
+
+.chat-md h2 {
+  font-size: 1.05rem;
+  text-transform: uppercase;
+}
+
+.chat-md h3 {
+  font-size: 0.98rem;
+}
+
+.chat-md ul,
+.chat-md ol {
+  margin: 0.4em 0;
+  padding-left: 1.25rem;
+}
+
+.chat-md li {
+  margin: 0.2em 0;
+}
+
+.chat-md li > p {
+  margin: 0.15em 0;
+}
+
+.chat-md strong {
+  font-weight: 700;
+}
+
+.chat-md em {
+  font-style: italic;
+}
+
+.chat-md a {
+  color: var(--main);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+}
+
+.chat-md--user a {
+  color: inherit;
+  text-decoration-thickness: 2px;
+}
+
+.chat-md blockquote {
+  margin: 0.5em 0;
+  padding: 0.35em 0.75em;
+  border-left: 3px solid var(--border);
+  opacity: 0.95;
+}
+
+.chat-md hr {
+  border: none;
+  border-top: 2px solid var(--border);
+  margin: 0.75em 0;
+}
+
+.chat-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border-radius: calc(var(--radius-base) * 0.35);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.chat-md pre {
+  margin: 0.55em 0;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+  border-radius: var(--radius-base);
+  border: 2px solid var(--border);
+  background: color-mix(in srgb, var(--secondary-background) 70%, var(--foreground) 6%);
+  box-shadow: var(--shadow-shadow);
+}
+
+.chat-md pre code {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.8em;
+  line-height: 1.45;
+}
+
+.chat-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.55em 0;
+  font-size: 0.9em;
+}
+
+.chat-md th,
+.chat-md td {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.55em;
+  text-align: left;
+}
+
+.chat-md th {
+  font-family: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
+  background: color-mix(in srgb, var(--main) 18%, transparent);
+}
+
+.chat-md--user code,
+.chat-md--user pre {
+  background: color-mix(in srgb, #000 18%, transparent);
+  border-color: color-mix(in srgb, #fff 35%, transparent);
+}
+
+/* Neo — neobrutal */
+.theme-neo .chat-md h1,
+.theme-neo .chat-md h2 {
+  text-transform: uppercase;
+}
+
+.theme-neo .chat-md pre,
+.theme-neo .chat-md code {
+  border-width: 2px;
+  border-color: #000;
+}
+
+.theme-neo .chat-md pre {
+  box-shadow: 3px 3px 0 #000;
+}
+
+.theme-neo .chat-md blockquote {
+  border-left-width: 4px;
+  border-left-color: #000;
+  background: color-mix(in srgb, var(--butter) 55%, transparent);
+}
+
+.theme-neo .chat-md th,
+.theme-neo .chat-md td {
+  border-width: 2px;
+  border-color: #000;
+}
+
+/* Clay — soft / pastel */
+.theme-clay .chat-md h1,
+.theme-clay .chat-md h2,
+.theme-clay .chat-md h3 {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.theme-clay .chat-md pre,
+.theme-clay .chat-md code {
+  border-width: 0;
+  border-radius: 16px;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--peach) 45%, #fff);
+}
+
+.theme-clay .chat-md blockquote {
+  border-left-color: var(--main);
+  border-radius: 0 12px 12px 0;
+  background: color-mix(in srgb, var(--mint) 40%, transparent);
+}
+
+.theme-clay .chat-md th,
+.theme-clay .chat-md td {
+  border-width: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.theme-clay .chat-md th {
+  background: color-mix(in srgb, var(--lavender) 60%, #fff);
+}
+
+/* Glass */
+.theme-glass .chat-md pre {
+  border-width: 1px;
+  border-color: color-mix(in oklab, var(--glass-edge, #fff) 55%, transparent);
+  background: color-mix(in oklab, var(--glass-fill, #fff) 35%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.35);
+}
+
+.theme-glass .chat-md code {
+  border-width: 1px;
+  background: color-mix(in oklab, var(--glass-fill, #fff) 28%, transparent);
+}
+
+.theme-glass .chat-md blockquote {
+  border-left-color: color-mix(in srgb, var(--main) 70%, #fff);
+  background: color-mix(in oklab, var(--glass-fill, #fff) 22%, transparent);
+}
+
+.theme-glass .chat-md a {
+  text-shadow: 0 0 12px color-mix(in srgb, var(--main) 40%, transparent);
+}
+
+/* Material */
+.theme-material .chat-md h1,
+.theme-material .chat-md h2,
+.theme-material .chat-md h3 {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  color: #1d1b20;
+}
+
+.theme-material .chat-md pre {
+  border: none;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.3),
+    0 2px 6px 2px rgb(0 0 0 / 0.15);
+  background: #f3edf7;
+}
+
+.theme-material .chat-md code {
+  border: none;
+  border-radius: 4px;
+  background: #e8def8;
+  color: #4a4458;
+}
+
+.theme-material .chat-md blockquote {
+  border-left-color: #6750a4;
+  border-radius: 0 8px 8px 0;
+  background: #f7f2fa;
+}
+
+.theme-material .chat-md a {
+  color: #6750a4;
+}
+
+.theme-material .chat-md th {
+  background: #e8def8;
+}
+
+/* Fluent */
+.theme-fluent .chat-md h1,
+.theme-fluent .chat-md h2,
+.theme-fluent .chat-md h3 {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.theme-fluent .chat-md pre {
+  border-width: 1px;
+  border-radius: 4px;
+  box-shadow: none;
+  background: rgb(255 255 255 / 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.theme-fluent .chat-md code {
+  border-radius: 2px;
+  border-width: 1px;
+  background: rgb(0 120 212 / 0.08);
+  color: #005a9e;
+}
+
+.theme-fluent .chat-md blockquote {
+  border-left-color: #0078d4;
+  background: rgb(0 120 212 / 0.06);
+}
+
+.theme-fluent .chat-md a {
+  color: #0078d4;
+  text-decoration: none;
+}
+
+.theme-fluent .chat-md a:hover {
+  text-decoration: underline;
+}
+
+.theme-fluent .chat-md th {
+  background: rgb(0 120 212 / 0.12);
+}

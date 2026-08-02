@@ -141,7 +141,7 @@ describe("pending plan helpers", () => {
     ).toContain("Cálculo");
   });
 
-  it("expands propose_study_plan with by_topic docs", async () => {
+  it("expands propose_study_plan with topic folders and daily sessions", async () => {
     const { expandToPlanSteps } = await import("@/server/pending-plans");
     const steps = expandToPlanSteps("propose_study_plan", {
       folderName: "Calculo",
@@ -151,12 +151,32 @@ describe("pending plan helpers", () => {
       scheduleTitle: "Agenda",
       topics: ["Limites", "Derivadas"],
       organizationMode: "by_topic",
-      includeForm: false,
-      targetDate: "2026-08-15",
+      includeForm: true,
+      targetDate: "2026-08-05",
+      dailyMinutes: 40,
     });
-    expect(steps.some((s) => s.tool === "create_folder")).toBe(true);
-    expect(steps.filter((s) => s.tool === "create_document").length).toBe(3);
+    const folders = steps.filter((s) => s.tool === "create_folder");
+    const docs = steps.filter((s) => s.tool === "create_document");
+    const forms = steps.filter((s) => s.tool === "generate_form");
+    expect(folders.length).toBe(3); // root + 2 topics
+    expect(folders.some((f) => f.input._folderKey === "topic_0")).toBe(true);
+    expect(docs.some((d) => d.input._docKey === "summary")).toBe(true);
+    expect(docs.some((d) => d.input._docKey === "session_0")).toBe(true);
+    expect(docs.length).toBeGreaterThan(3);
     expect(steps.some((s) => s.tool === "generate_schedule")).toBe(true);
+    expect(forms.some((f) => f.input._formRole === "course_review")).toBe(
+      true,
+    );
+    expect(forms.some((f) => f.input._formRole === "daily")).toBe(true);
+    const session0 = docs.find((d) => d.input._docKey === "session_0");
+    const body = String(session0?.input.initialContent ?? "");
+    expect(body).toContain("## Leitura");
+    expect(body).toContain("## Figura");
+    expect(body).toContain("![");
+    expect(body).toContain("## Para assistir");
+    expect(body).not.toContain("Wikipedia");
+    expect(body.length).toBeGreaterThan(800);
+    expect(body).toContain("## Anotações");
   });
 
   it("toToolPlanPreview maps ownership fields", () => {
@@ -179,6 +199,53 @@ describe("pending plan helpers", () => {
     const preview = toToolPlanPreview(plan);
     expect(preview.planId).toBe("p1");
     expect(preview.status).toBe("awaiting_confirmation");
+  });
+});
+
+describe("session template richness", () => {
+  it("builds full summary and session even with thin AI text", async () => {
+    const {
+      buildCourseSummaryContent,
+      buildDailySessionContent,
+    } = await import("@/server/session-template");
+    const summary = buildCourseSummaryContent({
+      courseName: "Biologia Celular",
+      topics: ["Organelas", "Membrana Celular", "Transporte Celular"],
+      overview: "Introdução curta.",
+      targetDate: "2026-08-15",
+      dailyMinutes: 45,
+    });
+    expect(summary).toContain("## Resumo por tópico");
+    expect(summary).toContain("Mitocôndria");
+    expect(summary.length).toBeGreaterThan(1000);
+
+    const session = buildDailySessionContent({
+      courseName: "Biologia Celular",
+      topic: "Organelas",
+      sessionNumber: 1,
+      sessionsInTopic: 6,
+      dateIso: "2026-07-30",
+      dailyMinutes: 45,
+      focusPoints: [],
+      studyBody: "Introdução às organelas: mitocôndria, núcleo, ribossomo.",
+      searchQuery: "Organelas Biologia Celular",
+    });
+    expect(session).toContain("Núcleo");
+    expect(session).toContain("Para assistir");
+    expect(session).toContain("khanacademy.org");
+    expect(session.length).toBeGreaterThan(800);
+  });
+});
+
+describe("markdown to blocks", () => {
+  it("keeps headings and images as separate blocks", async () => {
+    const { markdownToBlockNote } = await import("@/server/markdown-to-blocks");
+    const blocks = markdownToBlockNote(
+      `# Título\n\nParágrafo um.\n\n![Legenda](https://example.com/a.png)\n\n- item`,
+    );
+    expect(blocks[0]?.type).toBe("heading");
+    expect(blocks.some((b) => b.type === "image")).toBe(true);
+    expect(blocks.some((b) => b.type === "bulletListItem")).toBe(true);
   });
 });
 

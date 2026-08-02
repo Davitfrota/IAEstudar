@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   forwardRef,
   useCallback,
@@ -8,27 +9,28 @@ import {
   useRef,
   useState,
 } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { NaraMascot } from "@/components/NaraMascot";
 import {
   ToolPlanCard,
   type ToolPlanPreview,
 } from "@/components/ToolPlanCard";
 import type { PreviewQuestion } from "@/components/FormQuestionPreviewEditor";
-import { stripLeakedToolMarkup } from "@/lib/ai/groq-tools";
 
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
   toolPlan?: ToolPlanPreview;
+  links?: { href: string; label: string }[];
 };
 
 type Props = {
   onToolCallPreview?: (tool: string, input: unknown) => void;
-  onToolExecuted?: (tool: string) => void;
+  onToolExecuted?: (tool: string, meta?: { ok?: boolean }) => void;
   onActivePlanChange?: (plan: ToolPlanPreview | null) => void;
   onConversationChange?: (meta: {
     conversationId?: string;
@@ -42,6 +44,10 @@ export type AgentChatHandle = {
   newChat: () => void;
   openConversation: (id: string) => Promise<void>;
 };
+
+function stripTitleLine(text: string): string {
+  return text.replace(/^\s*T[ií]tulo\s*:\s*.+\n?/im, "").trimStart();
+}
 
 export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
   {
@@ -58,6 +64,8 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [scheduleLabel, setScheduleLabel] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [streamMode, setStreamMode] = useState<"chat" | "confirm" | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [activePlan, setActivePlan] = useState<ToolPlanPreview | null>(null);
   const [loadingThread, setLoadingThread] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -87,6 +95,7 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
   );
 
   const newChat = useCallback(() => {
+    abortRef.current?.abort();
     setMessages([]);
     setConversationId(undefined);
     setScheduleLabel(null);
@@ -128,9 +137,11 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
             .map((m) => ({
               id: m.id,
               role: m.role as "user" | "assistant",
-              content: m.content,
+              content: stripTitleLine(m.content),
             })),
         );
+        const pending = json.data.pendingPlan as ToolPlanPreview | null;
+        if (pending) setPlan(pending);
         notifyConversation(conv.id, label);
       } finally {
         setLoadingThread(false);
@@ -161,6 +172,10 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
       ]);
       setInput("");
       setStreaming(true);
+      setStreamMode("chat");
+      abortRef.current?.abort();
+      const abort = new AbortController();
+      abortRef.current = abort;
 
       try {
         const res = await fetch("/api/agent/chat", {
@@ -170,6 +185,7 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
             message: text.trim(),
             conversationId: conversationIdRef.current,
           }),
+          signal: abort.signal,
         });
 
         if (!res.ok || !res.body) {
@@ -218,7 +234,10 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, content: m.content + event.textDelta }
+                    ? {
+                        ...m,
+                        content: stripTitleLine(m.content + event.textDelta),
+                      }
                     : m,
                 ),
               );
@@ -237,7 +256,10 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
             }
 
             if (event.toolCall?.status === "executed") {
-              onToolExecuted?.(event.toolCall.name);
+              onToolExecuted?.(event.toolCall.name, { ok: true });
+            }
+            if (event.toolCall?.status === "error") {
+              onToolExecuted?.(event.toolCall.name, { ok: false });
             }
 
             if (event.error) {
@@ -252,21 +274,32 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
           }
         }
       } catch (error) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? {
-                  ...m,
-                  content:
-                    error instanceof Error
-                      ? error.message
-                      : "Erro ao falar com o agente",
-                }
-              : m,
-          ),
-        );
+        if (error instanceof DOMException && error.name === "AbortError") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: m.content || "Geração cancelada." }
+                : m,
+            ),
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    content:
+                      error instanceof Error
+                        ? error.message
+                        : "Erro ao falar com o agente",
+                  }
+                : m,
+            ),
+          );
+        }
       } finally {
         setStreaming(false);
+        setStreamMode(null);
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         onConversationsInvalidate?.();
       }
@@ -284,17 +317,34 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
   );
 
   const confirmPlan = async (draftQuestions?: PreviewQuestion[]) => {
-    if (!activePlan || streaming) return;
+    if (
+      !activePlan ||
+      streaming ||
+      (activePlan.status !== "awaiting_confirmation" &&
+        activePlan.status !== "error")
+    ) {
+      return;
+    }
     setStreaming(true);
+    setStreamMode("confirm");
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    let scheduleBound:
+      | { conversationId: string; scheduleId: string; title: string }
+      | undefined;
+    let folderId: string | undefined;
+    let formId: string | undefined;
+
     try {
       const res = await fetch(
         `/api/agent/plan/${activePlan.planId}/confirm`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            draftQuestions ? { draftQuestions } : {},
-          ),
+          body: JSON.stringify(draftQuestions ? { draftQuestions } : {}),
+          signal: abort.signal,
         },
       );
       if (!res.ok || !res.body) {
@@ -326,6 +376,7 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
               stepId: string;
               status: "running" | "done" | "error";
               error?: string;
+              result?: { folderId?: string; formId?: string; id?: string };
             };
           };
           if (event.toolPlan) {
@@ -333,6 +384,7 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
             setPlan(event.toolPlan);
           }
           if (event.scheduleBound) {
+            scheduleBound = event.scheduleBound;
             setScheduleLabel(event.scheduleBound.title);
             notifyConversation(
               event.scheduleBound.conversationId,
@@ -341,6 +393,9 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
             onConversationsInvalidate?.();
           }
           if (event.stepProgress) {
+            const result = event.stepProgress.result;
+            if (result?.folderId) folderId = String(result.folderId);
+            if (result?.formId) formId = String(result.formId);
             plan = {
               ...plan,
               steps: plan.steps.map((s) =>
@@ -358,32 +413,62 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
         }
       }
 
+      const links: { href: string; label: string }[] = [];
+      if (folderId) links.push({ href: "/pastas", label: "Abrir pastas" });
+      links.push({ href: "/agenda", label: "Ver agenda" });
+      if (formId) {
+        links.push({
+          href: `/formularios/${formId}/practice`,
+          label: "Praticar",
+        });
+      } else {
+        links.push({ href: "/formularios", label: "Ver formulários" });
+      }
+
+      const ok = plan.status === "done";
+      const content = ok
+        ? scheduleBound
+          ? `Plano executado e este chat ficou vinculado a “${scheduleBound.title}”. Próximos passos:`
+          : "Plano executado, mas o vínculo com o cronograma não foi confirmado. Abra a Agenda para conferir as sessões."
+        : "Alguns passos falharam. Use Retomar no card do plano para continuar só o que faltou.";
+
       setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content:
-            plan.status === "done"
-              ? "Plano executado. Este chat ficou vinculado ao cronograma — posso acompanhar seu estudo daqui."
-              : "Plano terminou com erro em algum passo.",
+          content,
           toolPlan: plan,
+          links: ok ? links : undefined,
         },
       ]);
-      onToolExecuted?.("tool_plan");
-      if (plan.status === "done") setPlan(null);
+      onToolExecuted?.("tool_plan", { ok });
+      if (ok) setPlan(null);
     } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content:
-            error instanceof Error ? error.message : "Falha na confirmação",
-        },
-      ]);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              "Execução interrompida. Se o plano ainda existir, use Retomar no card.",
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content:
+              error instanceof Error ? error.message : "Falha na confirmação",
+          },
+        ]);
+      }
     } finally {
       setStreaming(false);
+      setStreamMode(null);
       onConversationsInvalidate?.();
     }
   };
@@ -393,14 +478,18 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
     await fetch(`/api/agent/plan/${activePlan.planId}/cancel`, {
       method: "POST",
     });
-    setPlan(
-      activePlan ? { ...activePlan, status: "expired" } : null,
-    );
+    setPlan(activePlan ? { ...activePlan, status: "expired" } : null);
   };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!activePlan || activePlan.status !== "awaiting_confirmation") return;
+      if (
+        !activePlan ||
+        (activePlan.status !== "awaiting_confirmation" &&
+          activePlan.status !== "error")
+      ) {
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         void cancelPlan();
@@ -417,71 +506,136 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
   return (
     <Card className="flex h-full min-h-[70vh] flex-col overflow-hidden">
       <CardHeader>
-        <CardTitle className="uppercase">Nara</CardTitle>
-        <p className="text-sm opacity-80">
-          {scheduleLabel
-            ? `Tutora do cronograma: ${scheduleLabel}`
-            : "Sua professora particular — conte o objetivo, o prazo e o nível para montarmos o plano."}
-        </p>
+        <div className="flex items-start gap-3">
+          <NaraMascot size={48} avatar pose="idle" />
+          <div className="min-w-0 flex-1">
+            <CardTitle className="uppercase">Nara</CardTitle>
+            <p className="text-sm opacity-80">
+              {scheduleLabel
+                ? `Tutora do cronograma: ${scheduleLabel}`
+                : "Sua professora particular — conte o objetivo, o prazo e o nível para montarmos o plano."}
+            </p>
+          </div>
+        </div>
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-0 overflow-hidden p-0">
-        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
           {loadingThread ? (
             <p className="text-sm opacity-80">Carregando conversa…</p>
           ) : null}
 
           {!loadingThread && messages.length === 0 ? (
-            <Alert>
-              <AlertTitle>Fale com a Nara</AlertTitle>
-              <AlertDescription>
-                Ex.: “Quero estudar cálculo para a prova”. Ela pergunta objetivo,
-                prazo e nível antes de montar o plano — e depois acompanha o
-                cronograma neste chat.
-              </AlertDescription>
-            </Alert>
+            <div className="flex items-start gap-3">
+              <NaraMascot size={52} avatar pose="idle" />
+              <div className="max-w-[min(100%,36rem)] rounded-2xl border-2 border-border bg-secondary-background px-4 py-3 text-sm shadow-shadow">
+                <p className="font-heading text-xs uppercase tracking-tight opacity-70">
+                  Nara
+                </p>
+                <p className="mt-1 leading-relaxed">
+                  Olá! Sou a <strong>Nara</strong>, sua professora particular.
+                  Conte o <strong>objetivo</strong>, o <strong>prazo</strong> e
+                  o <strong>nível</strong> — eu monto o plano e acompanho o
+                  cronograma neste chat.
+                </p>
+                <p className="mt-2 text-xs opacity-70">
+                  Ex.: “Quero estudar cálculo para a prova daqui a 3 semanas,
+                  nível intermediário.”
+                </p>
+              </div>
+            </div>
           ) : null}
 
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              className={`max-w-[95%] rounded-base border-2 border-border px-3 py-2 text-sm shadow-shadow ${
-                m.role === "user"
-                  ? "ml-auto bg-main text-main-foreground"
-                  : "bg-lavender"
-              }`}
-            >
-              <p className="whitespace-pre-wrap font-base">
-                {stripLeakedToolMarkup(m.content)}
-              </p>
-              {m.toolPlan && m.toolPlan.planId !== activePlan?.planId ? (
-                <ToolPlanCard
-                  plan={m.toolPlan}
-                  disabled
-                  onConfirm={() => undefined}
-                  onCancel={() => undefined}
-                  onRequestEdit={() => undefined}
+          {messages.map((m) => {
+            const isUser = m.role === "user";
+            const isThinking =
+              !isUser && streaming && !m.content.trim() && !m.toolPlan;
+
+            if (isUser) {
+              return (
+                <div key={m.id} className="flex justify-end">
+                  <div className="max-w-[min(95%,36rem)] rounded-2xl border-2 border-border bg-main px-4 py-2.5 text-sm text-main-foreground shadow-shadow">
+                    <ChatMarkdown content={m.content} variant="user" />
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={m.id} className="flex items-start gap-3">
+                <NaraMascot
+                  size={52}
+                  avatar
+                  pose={isThinking ? "thinking" : "idle"}
                 />
-              ) : null}
-            </div>
-          ))}
+                <div className="min-w-0 max-w-[min(100%,36rem)] flex-1">
+                  {isThinking ? (
+                    <div className="inline-flex items-center gap-2 rounded-2xl border-2 border-border bg-secondary-background px-4 py-3 shadow-shadow">
+                      <span className="flex gap-1" aria-label="Nara pensando">
+                        <span className="size-2 animate-bounce rounded-full bg-foreground/50 [animation-delay:0ms]" />
+                        <span className="size-2 animate-bounce rounded-full bg-foreground/50 [animation-delay:150ms]" />
+                        <span className="size-2 animate-bounce rounded-full bg-foreground/50 [animation-delay:300ms]" />
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border-2 border-border bg-secondary-background px-4 py-2.5 text-sm shadow-shadow">
+                      {m.content.trim() ? (
+                        <ChatMarkdown
+                          content={m.content}
+                          variant="assistant"
+                        />
+                      ) : null}
+                      {m.links?.length ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {m.links.map((link) => (
+                            <Link key={link.href + link.label} href={link.href}>
+                              <Button type="button" size="sm" variant="neutral">
+                                {link.label}
+                              </Button>
+                            </Link>
+                          ))}
+                        </div>
+                      ) : null}
+                      {m.toolPlan &&
+                      m.toolPlan.planId !== activePlan?.planId ? (
+                        <ToolPlanCard
+                          plan={m.toolPlan}
+                          disabled
+                          onConfirm={() => undefined}
+                          onCancel={() => undefined}
+                          onRequestEdit={() => undefined}
+                        />
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
 
           {activePlan ? (
-            <ToolPlanCard
-              plan={activePlan}
-              disabled={
-                streaming && activePlan.status === "awaiting_confirmation"
-              }
-              live
-              onPlanChange={setPlan}
-              onConfirm={(qs) => void confirmPlan(qs)}
-              onCancel={() => void cancelPlan()}
-              onRequestEdit={(instruction) => {
-                void cancelPlan().then(() =>
-                  send(`Ajuste o plano: ${instruction}`),
-                );
-              }}
-            />
+            <div className="flex items-start gap-3">
+              <NaraMascot size={52} avatar pose="idle" />
+              <div className="min-w-0 flex-1">
+                <ToolPlanCard
+                  plan={activePlan}
+                  disabled={
+                    streaming &&
+                    (activePlan.status === "awaiting_confirmation" ||
+                      activePlan.status === "executing")
+                  }
+                  live
+                  onPlanChange={setPlan}
+                  onConfirm={(qs) => void confirmPlan(qs)}
+                  onCancel={() => void cancelPlan()}
+                  onRequestEdit={(instruction) => {
+                    void cancelPlan().then(() =>
+                      send(`Ajuste o plano: ${instruction}`),
+                    );
+                  }}
+                />
+              </div>
+            </div>
           ) : null}
           <div ref={bottomRef} />
         </div>
@@ -499,12 +653,19 @@ export const AgentChat = forwardRef<AgentChatHandle, Props>(function AgentChat(
             placeholder="O que você quer estudar?"
             disabled={streaming || loadingThread}
           />
-          <Button
-            type="submit"
-            disabled={streaming || loadingThread || !input.trim()}
-          >
-            Enviar
-          </Button>
+          {streaming ? (
+            <Button
+              type="button"
+              variant="neutral"
+              onClick={() => abortRef.current?.abort()}
+            >
+              {streamMode === "confirm" ? "Parar plano" : "Parar"}
+            </Button>
+          ) : (
+            <Button type="submit" disabled={loadingThread || !input.trim()}>
+              Enviar
+            </Button>
+          )}
         </form>
       </CardContent>
     </Card>

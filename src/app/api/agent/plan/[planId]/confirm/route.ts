@@ -4,14 +4,24 @@ import { executeMcpTool } from "@/server/mcp/tools";
 import {
   deletePendingPlan,
   getPendingPlan,
+  preparePlanResume,
   toToolPlanPreview,
   updatePendingPlan,
 } from "@/server/pending-plans";
 import { publishPlanProgress } from "@/server/plan-progress";
 import { updatePlanDraftSchema } from "@/server/schemas";
 import { ConversationService } from "@/server/services/conversation-service";
+import { createDbClient } from "@/lib/supabase/admin";
 
 type Params = { params: Promise<{ planId: string }> };
+
+function stripPlanMeta(input: Record<string, unknown>) {
+  const next = { ...input };
+  for (const key of Object.keys(next)) {
+    if (key.startsWith("_")) delete next[key];
+  }
+  return next;
+}
 
 export async function POST(request: Request, { params }: Params) {
   try {
@@ -27,12 +37,23 @@ export async function POST(request: Request, { params }: Params) {
       throw new AppError("Plano de outro usuário", 403, "PLAN_FORBIDDEN");
     }
 
+    // Resume: limpa steps com erro/running e renova TTL
+    const hasPartial =
+      plan.steps.some((s) => s.status === "done") &&
+      plan.steps.some((s) => s.status !== "done");
+    if (hasPartial) {
+      plan = (await preparePlanResume(planId)) ?? plan;
+    }
+
     try {
       const body = await request.json();
       const parsed = updatePlanDraftSchema.safeParse(body);
       if (parsed.success && parsed.data.draftQuestions) {
         for (const step of plan.steps) {
-          if (step.tool === "generate_form") {
+          if (
+            step.tool === "generate_form" &&
+            step.input._formRole === "course_review"
+          ) {
             step.input = {
               ...step.input,
               questions: parsed.data.draftQuestions,
@@ -67,13 +88,67 @@ export async function POST(request: Request, { params }: Params) {
         });
 
         let failed = false;
-        let lastFolderId: string | undefined;
-        let lastDocumentId: string | undefined;
-        let firstDocumentId: string | undefined;
+        const folderIds = new Map<string, string>();
+        const docIds = new Map<string, string>();
+        const sessionByDay = new Map<
+          number,
+          { documentId: string; folderId?: string }
+        >();
+        let scheduleItems: Array<{
+          id: string;
+          position: number;
+        }> = [];
         let boundScheduleId: string | undefined;
         let boundScheduleTitle: string | undefined;
+        let linkedScheduleDocs = false;
+
+        // Reconstrói IDs a partir de steps já concluídos (resume)
+        for (const step of plan!.steps) {
+          if (step.status !== "done" || !step.result) continue;
+          const data = step.result as Record<string, unknown>;
+          const raw = step.input;
+          if (step.tool === "create_folder" && data.folderId) {
+            const key =
+              typeof raw._folderKey === "string" ? raw._folderKey : "root";
+            folderIds.set(key, String(data.folderId));
+          }
+          if (step.tool === "create_document" && data.documentId) {
+            const docKey =
+              typeof raw._docKey === "string"
+                ? raw._docKey
+                : `doc_${docIds.size}`;
+            docIds.set(docKey, String(data.documentId));
+            if (typeof raw._dayIndex === "number") {
+              const folderKey =
+                typeof raw._folderKey === "string" ? raw._folderKey : undefined;
+              sessionByDay.set(raw._dayIndex, {
+                documentId: String(data.documentId),
+                folderId: folderKey ? folderIds.get(folderKey) : undefined,
+              });
+            }
+          }
+          if (step.tool === "generate_schedule" && data.scheduleId) {
+            boundScheduleId = String(data.scheduleId);
+            boundScheduleTitle =
+              typeof raw.title === "string" ? raw.title : undefined;
+            const items = data.items as
+              | Array<{ id: string; position?: number }>
+              | undefined;
+            if (Array.isArray(items)) {
+              scheduleItems = items
+                .map((it, idx) => ({
+                  id: String(it.id),
+                  position:
+                    typeof it.position === "number" ? it.position : idx,
+                }))
+                .sort((a, b) => a.position - b.position);
+            }
+          }
+        }
 
         for (const step of plan!.steps) {
+          if (step.status === "done") continue;
+
           step.status = "running";
           await updatePendingPlan(planId, { steps: plan!.steps });
 
@@ -90,32 +165,82 @@ export async function POST(request: Request, { params }: Params) {
             step: progressRunning,
           });
 
+          const raw = { ...step.input };
           const input: Record<string, unknown> = {
             ...(step.tool === "generate_schedule" ||
             step.tool === "generate_form" ||
             step.tool === "update_document"
-              ? { ...step.input, confirmed: true }
-              : step.input),
+              ? { ...raw, confirmed: true }
+              : raw),
           };
 
-          if (step.tool === "create_document" && lastFolderId) {
-            input.folderId = lastFolderId;
-          }
-          if (step.tool === "generate_form") {
-            const sourceId = firstDocumentId ?? lastDocumentId;
-            if (sourceId) {
-              input.sourceDocumentId = sourceId;
+          if (step.tool === "create_folder") {
+            const parentKey = raw._parentFolderKey;
+            if (typeof parentKey === "string" && folderIds.has(parentKey)) {
+              input.parentFolderId = folderIds.get(parentKey);
             }
-            if (plan!.draftQuestions?.length && !input.questions) {
+          }
+
+          if (step.tool === "create_document") {
+            const folderKey = raw._folderKey;
+            if (typeof folderKey === "string" && folderIds.has(folderKey)) {
+              input.folderId = folderIds.get(folderKey);
+            } else if (folderIds.has("root")) {
+              input.folderId = folderIds.get("root");
+            }
+          }
+
+          if (step.tool === "generate_form") {
+            const docKey = raw._docKey;
+            if (typeof docKey === "string" && docIds.has(docKey)) {
+              input.sourceDocumentId = docIds.get(docKey);
+            } else if (docIds.has("summary")) {
+              input.sourceDocumentId = docIds.get("summary");
+            }
+
+            const dayIndex =
+              typeof raw._dayIndex === "number" ? raw._dayIndex : undefined;
+            if (dayIndex != null && scheduleItems[dayIndex]) {
+              input.scheduleItemId = scheduleItems[dayIndex]!.id;
+            }
+
+            if (
+              plan!.draftQuestions?.length &&
+              raw._formRole === "course_review" &&
+              !input.questions
+            ) {
               input.questions = plan!.draftQuestions;
             }
             delete input._deferredPreview;
           }
 
+          if (
+            step.tool === "generate_form" &&
+            !linkedScheduleDocs &&
+            scheduleItems.length > 0 &&
+            sessionByDay.size > 0
+          ) {
+            const db = await createDbClient();
+            for (const [dayIndex, session] of sessionByDay) {
+              const item = scheduleItems[dayIndex];
+              if (!item) continue;
+              await db
+                .from("schedule_items")
+                .update({
+                  document_id: session.documentId,
+                  folder_id: session.folderId ?? null,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", item.id)
+                .eq("user_id", user.id);
+            }
+            linkedScheduleDocs = true;
+          }
+
           const result = await executeMcpTool(
             { userId: user.id },
             step.tool,
-            input,
+            stripPlanMeta(input),
           );
 
           if (result.status === "error") {
@@ -135,26 +260,77 @@ export async function POST(request: Request, { params }: Params) {
               event: "step",
               step: progressError,
             });
+            await updatePendingPlan(planId, { steps: plan!.steps });
             break;
           }
 
           step.status = "done";
           step.result = result.data;
           const data = result.data as Record<string, unknown> | undefined;
+
           if (step.tool === "create_folder" && data?.folderId) {
-            lastFolderId = String(data.folderId);
+            const key =
+              typeof raw._folderKey === "string" ? raw._folderKey : "root";
+            folderIds.set(key, String(data.folderId));
           }
+
           if (step.tool === "create_document" && data?.documentId) {
-            lastDocumentId = String(data.documentId);
-            firstDocumentId ??= lastDocumentId;
+            const docId = String(data.documentId);
+            const docKey =
+              typeof raw._docKey === "string"
+                ? raw._docKey
+                : `doc_${docIds.size}`;
+            docIds.set(docKey, docId);
+
+            if (typeof raw._dayIndex === "number") {
+              const folderKey =
+                typeof raw._folderKey === "string" ? raw._folderKey : undefined;
+              sessionByDay.set(raw._dayIndex, {
+                documentId: docId,
+                folderId: folderKey ? folderIds.get(folderKey) : undefined,
+              });
+            }
           }
+
           if (step.tool === "generate_schedule" && data?.scheduleId) {
             boundScheduleId = String(data.scheduleId);
             boundScheduleTitle =
               typeof step.input.title === "string"
                 ? step.input.title
                 : undefined;
+            const items = data.items as
+              | Array<{ id: string; position?: number }>
+              | undefined;
+            if (Array.isArray(items)) {
+              scheduleItems = items
+                .map((it, idx) => ({
+                  id: String(it.id),
+                  position:
+                    typeof it.position === "number" ? it.position : idx,
+                }))
+                .sort((a, b) => a.position - b.position);
+            }
+
+            if (!linkedScheduleDocs && sessionByDay.size > 0) {
+              const db = await createDbClient();
+              for (const [dayIndex, session] of sessionByDay) {
+                const item = scheduleItems[dayIndex];
+                if (!item) continue;
+                await db
+                  .from("schedule_items")
+                  .update({
+                    document_id: session.documentId,
+                    folder_id: session.folderId ?? null,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", item.id)
+                  .eq("user_id", user.id);
+              }
+              linkedScheduleDocs = true;
+            }
           }
+
+          await updatePendingPlan(planId, { steps: plan!.steps });
 
           const progressDone = {
             stepId: step.id,
@@ -205,7 +381,12 @@ export async function POST(request: Request, { params }: Params) {
           toolPlan: finalPlan,
         });
 
-        await deletePendingPlan(planId);
+        // Só apaga quando concluído com sucesso — em erro mantém para resume
+        if (!failed) {
+          await deletePendingPlan(planId);
+        } else {
+          await updatePendingPlan(planId, { steps: plan!.steps });
+        }
         controller.close();
       },
     });

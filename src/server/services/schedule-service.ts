@@ -1,13 +1,14 @@
-import { addDays, differenceInCalendarDays, formatISO, parseISO } from "date-fns";
+import { addDays, formatISO, parseISO } from "date-fns";
 import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
+import {
+  localTodayIso,
+  MAX_STUDY_PLAN_DAYS,
+  studyPlanDayCount,
+} from "@/server/date-utils";
 import { assertGenerateRateLimit } from "@/server/rate-limit";
 import { ScheduleRepository } from "@/server/repositories/schedule-repository";
 import type { GenerateScheduleInput } from "@/server/schemas";
-
-function todayIsoDate() {
-  return formatISO(new Date(), { representation: "date" });
-}
 
 export class ScheduleService {
   private async repo() {
@@ -30,12 +31,12 @@ export class ScheduleService {
   async generate(userId: string, input: GenerateScheduleInput) {
     await assertGenerateRateLimit(userId, "generate_schedule");
 
-    const start = parseISO(todayIsoDate());
-    const end = input.targetDate
-      ? parseISO(input.targetDate)
-      : addDays(start, 13);
-
-    const dayCount = Math.max(1, differenceInCalendarDays(end, start) + 1);
+    const start = parseISO(localTodayIso());
+    const dayCount = studyPlanDayCount({
+      targetDate: input.targetDate,
+      maxDays: MAX_STUDY_PLAN_DAYS,
+    });
+    const end = addDays(start, dayCount - 1);
     const topics = input.topics.map((t) => t.trim()).filter(Boolean);
     if (topics.length === 0) {
       throw new AppError("Informe ao menos 1 tópico", 400, "INSUFFICIENT_TOPICS");

@@ -1,7 +1,17 @@
 import { nanoid } from "nanoid";
 import { createDbClient } from "@/lib/supabase/admin";
 import { getRedis } from "@/server/redis";
-import { normalizeFutureDate } from "@/server/date-utils";
+import {
+  localTodayIso,
+  normalizeFutureDate,
+  studyPlanDayCount,
+} from "@/server/date-utils";
+import {
+  buildCourseSummaryContent,
+  buildDailySessionContent,
+} from "@/server/session-template";
+import { AppError } from "@/server/http";
+import { addDays, formatISO, parseISO } from "date-fns";
 
 export type PlanStepStatus = "pending" | "running" | "done" | "error";
 
@@ -147,26 +157,73 @@ export async function createPendingPlan(input: {
     expiresAt: now + TTL_MS,
   };
 
-  // L1 sempre (mesmo processo / HMR parcial)
   pruneMemory();
   memory.set(plan.planId, plan);
 
+  let durable = false;
   const redis = await redisGetSet();
   if (redis) {
     try {
       await redis.set(`${REDIS_PREFIX}${plan.planId}`, plan, {
         ex: Math.ceil(TTL_MS / 1000),
       });
+      durable = true;
     } catch {
       // ignore
     }
   }
 
   const saved = await pgSave(plan);
-  if (!saved.ok) {
-    console.warn("[pending-plans] pgSave falhou, usando memória/Redis:", saved.error);
+  if (saved.ok) {
+    durable = true;
+  } else {
+    console.warn("[pending-plans] pgSave falhou:", saved.error);
   }
 
+  if (!durable) {
+    memory.delete(plan.planId);
+    if (process.env.NODE_ENV === "production") {
+      throw new AppError(
+        "Não foi possível persistir o plano. Configure Redis ou a tabela pending_agent_plans.",
+        503,
+        "PLAN_STORE_UNAVAILABLE",
+      );
+    }
+    console.warn(
+      "[pending-plans] fallback memória (dev only) — instável em multi-instância",
+    );
+    memory.set(plan.planId, plan);
+  }
+
+  return plan;
+}
+
+/** Estende TTL e limpa steps em erro para permitir resume. */
+export async function preparePlanResume(
+  planId: string,
+): Promise<PendingPlan | null> {
+  const plan = await getPendingPlan(planId);
+  if (!plan) return null;
+  const now = Date.now();
+  plan.expiresAt = now + TTL_MS;
+  for (const step of plan.steps) {
+    if (step.status === "error" || step.status === "running") {
+      step.status = "pending";
+      delete step.error;
+    }
+  }
+  memory.set(planId, plan);
+  const redis = await redisGetSet();
+  if (redis) {
+    try {
+      await redis.set(`${REDIS_PREFIX}${planId}`, plan, {
+        ex: Math.ceil(TTL_MS / 1000),
+      });
+    } catch {
+      // ignore
+    }
+  }
+  await pgSave(plan);
   return plan;
 }
 
@@ -203,10 +260,15 @@ export async function getPendingPlan(
 export async function updatePendingPlan(
   planId: string,
   patch: Partial<Pick<PendingPlan, "draftQuestions" | "steps" | "summary">>,
+  opts?: { extendTtl?: boolean },
 ): Promise<PendingPlan | null> {
   const plan = await getPendingPlan(planId);
   if (!plan) return null;
   Object.assign(plan, patch);
+  if (opts?.extendTtl !== false) {
+    // Heartbeat: renova TTL a cada step (execução longa não “expira” no meio)
+    plan.expiresAt = Date.now() + TTL_MS;
+  }
   memory.set(planId, plan);
 
   const redis = await redisGetSet();
@@ -220,6 +282,47 @@ export async function updatePendingPlan(
   }
   await pgSave(plan);
   return plan;
+}
+
+/** Plano pendente ainda vivo para uma conversa (restauração na UI). */
+export async function getPendingPlanForConversation(
+  userId: string,
+  conversationId: string,
+): Promise<PendingPlan | null> {
+  pruneMemory();
+  for (const plan of memory.values()) {
+    if (
+      plan.userId === userId &&
+      plan.conversationId === conversationId &&
+      plan.expiresAt > Date.now()
+    ) {
+      return plan;
+    }
+  }
+
+  try {
+    const db = await createDbClient();
+    const { data } = await db
+      .from("pending_agent_plans")
+      .select("payload, expires_at")
+      .eq("user_id", userId)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(20);
+    for (const row of data ?? []) {
+      const plan = row.payload as PendingPlan;
+      if (
+        plan.conversationId === conversationId &&
+        plan.expiresAt > Date.now()
+      ) {
+        memory.set(plan.planId, plan);
+        return plan;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 export async function deletePendingPlan(planId: string) {
@@ -310,13 +413,15 @@ export function expandToPlanSteps(
   const topics = Array.isArray(input.topics)
     ? input.topics.map(String).filter(Boolean)
     : [];
+  const topicList = topics.length ? topics : [folderName];
   const includeForm = input.includeForm !== false;
   const formType = String(input.formType ?? "flashcard_deck");
   const formInstruction = String(
     input.formInstruction ??
-      `Flashcards sobre: ${topics.join(", ") || folderName}`,
+      `Flashcards de revisão geral: ${topicList.join(", ")}`,
   );
   const questionCount = Number(input.questionCount ?? 8);
+  const dailyMinutes = Number(input.dailyMinutes ?? 30);
   const organizationMode =
     input.organizationMode === "by_day" ? "by_day" : "by_topic";
 
@@ -334,6 +439,15 @@ export function expandToPlanSteps(
     return body.length >= 50 ? body : `${fallback} `.repeat(3).slice(0, 120);
   };
 
+  const targetIso = input.targetDate
+    ? normalizeFutureDate(String(input.targetDate))
+    : undefined;
+
+  const start = parseISO(localTodayIso());
+  const dayCount = studyPlanDayCount({ targetDate: targetIso });
+
+  const MAX_DAILY_FORMS = 7; // só a 1ª semana; resto sob demanda depois
+
   const steps: {
     tool: string;
     description: string;
@@ -342,82 +456,158 @@ export function expandToPlanSteps(
     {
       tool: "create_folder",
       description: describeToolStep("create_folder", { name: folderName }),
-      input: { name: folderName },
+      input: {
+        name: folderName,
+        _folderKey: "root",
+      },
     },
     {
       tool: "create_document",
       description: describeToolStep("create_document", {
-        title: summaryTitle,
+        title: summaryTitle.startsWith("Resumo")
+          ? summaryTitle
+          : `Resumo — ${summaryTitle}`,
       }),
       input: {
         title: summaryTitle.startsWith("Resumo")
           ? summaryTitle
           : `Resumo — ${summaryTitle}`,
         initialContent: ensureContent(
-          documentContent,
-          `Visão geral de ${folderName}. Tópicos: ${topics.join(", ")}.`,
+          buildCourseSummaryContent({
+            courseName: folderName,
+            topics: topicList,
+            overview: documentContent,
+            targetDate: targetIso,
+            dailyMinutes,
+          }),
+          `Visão geral de ${folderName}.`,
         ),
+        _folderKey: "root",
+        _docKey: "summary",
       },
     },
   ];
 
-  // Arquivos extras: por tema ou por dia
-  const MAX_LESSON_DOCS = 21;
   if (organizationMode === "by_topic") {
-    const notes =
-      lessonNotes.length > 0
-        ? lessonNotes.slice(0, MAX_LESSON_DOCS)
-        : topics.slice(0, MAX_LESSON_DOCS).map((t) => ({
-            title: t,
-            content: `Estudo focado em ${t} (tema ${folderName}). Conceitos-chave, exemplos e pontos de atenção.`,
-          }));
-    for (const note of notes) {
+    // Pasta por tema + sessões (1 por dia, round-robin nos temas)
+    for (let ti = 0; ti < topicList.length; ti++) {
+      const topic = topicList[ti]!;
       steps.push({
-        tool: "create_document",
-        description: describeToolStep("create_document", {
-          title: note.title,
-        }),
+        tool: "create_folder",
+        description: describeToolStep("create_folder", { name: topic }),
         input: {
-          title: note.title,
-          initialContent: ensureContent(
-            note.content,
-            `Material do tópico ${note.title}.`,
-          ),
+          name: topic,
+          _folderKey: `topic_${ti}`,
+          _parentFolderKey: "root",
         },
       });
     }
-  } else {
-    // by_day: um arquivo por dia até targetDate (cap)
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = input.targetDate
-      ? new Date(
-          `${normalizeFutureDate(String(input.targetDate))}T00:00:00`,
-        )
-      : new Date(start.getTime() + 13 * 86400000);
-    const dayCount = Math.max(
-      1,
-      Math.round((end.getTime() - start.getTime()) / 86400000) + 1,
-    );
-    const n = Math.min(dayCount, MAX_LESSON_DOCS);
 
-    for (let i = 0; i < n; i++) {
-      const topic = topics[i % Math.max(topics.length, 1)] ?? folderName;
+    const sessionsInTopic = Math.ceil(dayCount / topicList.length);
+
+    for (let i = 0; i < dayCount; i++) {
+      const ti = i % topicList.length;
+      const topic = topicList[ti]!;
+      const sessionNumber = Math.floor(i / topicList.length) + 1;
+      const dateIso = formatISO(addDays(start, i), {
+        representation: "date",
+      });
       const provided = lessonNotes[i];
-      const date = new Date(start.getTime() + i * 86400000);
-      const iso = date.toISOString().slice(0, 10);
       const title =
         provided?.title ||
-        `Dia ${i + 1} (${iso}) — ${topic}`;
-      const content =
-        provided?.content ||
-        `Plano do dia ${i + 1} (${iso}): estudar ${topic}. Objetivos, exercícios e revisão rápida.`;
+        `Sessão ${sessionNumber} — ${topic} (${dateIso})`;
+
+      const focusFromNote = provided?.content
+        ? provided.content
+            .split(/[\n.;]/)
+            .map((s) => s.trim())
+            .filter((s) => s.length > 12)
+            .slice(0, 4)
+        : [];
+
+      const content = ensureContent(
+        buildDailySessionContent({
+          courseName: folderName,
+          topic,
+          sessionNumber,
+          sessionsInTopic,
+          dateIso,
+          dailyMinutes,
+          focusPoints:
+            focusFromNote.length > 0
+              ? focusFromNote
+              : [
+                  `Conceitos centrais de ${topic}`,
+                  `Exemplos e aplicações`,
+                  `Erros comuns neste tópico`,
+                ],
+          studyBody:
+            provided?.content && provided.content.length >= 50
+              ? provided.content
+              : undefined,
+          searchQuery: `${topic} ${folderName}`,
+        }),
+        `Sessão ${sessionNumber} de ${topic}.`,
+      );
+
       steps.push({
         tool: "create_document",
         description: describeToolStep("create_document", { title }),
         input: {
           title,
-          initialContent: ensureContent(content, `Sessão do dia ${i + 1}.`),
+          initialContent: content,
+          _folderKey: `topic_${ti}`,
+          _docKey: `session_${i}`,
+          _dayIndex: i,
+        },
+      });
+    }
+  } else {
+    // by_day: pasta "Sessões" + um arquivo por dia
+    steps.push({
+      tool: "create_folder",
+      description: describeToolStep("create_folder", { name: "Sessões" }),
+      input: {
+        name: "Sessões",
+        _folderKey: "sessions",
+        _parentFolderKey: "root",
+      },
+    });
+
+    for (let i = 0; i < dayCount; i++) {
+      const topic = topicList[i % topicList.length]!;
+      const dateIso = formatISO(addDays(start, i), {
+        representation: "date",
+      });
+      const provided = lessonNotes[i];
+      const title =
+        provided?.title || `Dia ${i + 1} (${dateIso}) — ${topic}`;
+      const content = ensureContent(
+        buildDailySessionContent({
+          courseName: folderName,
+          topic,
+          sessionNumber: i + 1,
+          sessionsInTopic: dayCount,
+          dateIso,
+          dailyMinutes,
+          focusPoints: [`Foco do dia: ${topic}`],
+          studyBody:
+            provided?.content && provided.content.length >= 50
+              ? provided.content
+              : undefined,
+          searchQuery: `${topic} ${folderName}`,
+        }),
+        `Sessão do dia ${i + 1}.`,
+      );
+      steps.push({
+        tool: "create_document",
+        description: describeToolStep("create_document", { title }),
+        input: {
+          title,
+          initialContent: content,
+          _folderKey: "sessions",
+          _docKey: `session_${i}`,
+          _dayIndex: i,
         },
       });
     }
@@ -427,20 +617,19 @@ export function expandToPlanSteps(
     tool: "generate_schedule",
     description: describeToolStep("generate_schedule", {
       title: scheduleTitle,
-      topics,
+      topics: topicList,
     }),
     input: {
       title: scheduleTitle,
-      topics: topics.length ? topics : [folderName],
-      targetDate: input.targetDate
-        ? normalizeFutureDate(String(input.targetDate))
-        : input.targetDate,
-      dailyMinutes: input.dailyMinutes ?? 30,
+      topics: topicList,
+      targetDate: targetIso,
+      dailyMinutes,
       confirmed: false,
     },
   });
 
   if (includeForm) {
+    // Deck geral no resumo
     steps.push({
       tool: "generate_form",
       description: describeToolStep("generate_form", {
@@ -454,8 +643,31 @@ export function expandToPlanSteps(
         questionCount,
         confirmed: false,
         _deferredPreview: true,
+        _docKey: "summary",
+        _formRole: "course_review",
       },
     });
+
+    // Formulário do dia (quiz) por sessão — cap para custo/latência
+    const dailyFormCount = Math.min(dayCount, MAX_DAILY_FORMS);
+    for (let i = 0; i < dailyFormCount; i++) {
+      const topic = topicList[i % topicList.length]!;
+      steps.push({
+        tool: "generate_form",
+        description: `Formulário do dia ${i + 1} (${topic})`,
+        input: {
+          sourceDocumentId: "00000000-0000-4000-8000-000000000000",
+          type: "quiz",
+          instruction: `Quiz do dia sobre ${topic} no curso ${folderName}. Inclua 1 questão aberta de reflexão no conjunto se possível via enunciados claros. Baseie-se só no documento da sessão.`,
+          questionCount: Math.min(6, questionCount),
+          confirmed: false,
+          _deferredPreview: true,
+          _docKey: `session_${i}`,
+          _dayIndex: i,
+          _formRole: "daily",
+        },
+      });
+    }
   }
 
   return steps;

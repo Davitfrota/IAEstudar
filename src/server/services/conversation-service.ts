@@ -1,4 +1,5 @@
 import { createDbClient } from "@/lib/supabase/admin";
+import { localOffsetIso, localTodayIso } from "@/server/date-utils";
 import { AppError } from "@/server/http";
 import type {
   ConversationListItem,
@@ -102,6 +103,7 @@ export class ConversationService {
     userId: string,
     conversationId: string,
     title: string,
+    opts?: { force?: boolean },
   ): Promise<void> {
     const db = await createDbClient();
     const trimmed = title.trim().slice(0, 120);
@@ -114,7 +116,7 @@ export class ConversationService {
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (!data || data.title) return;
+    if (!data || (!opts?.force && data.title)) return;
 
     await db
       .from("conversations")
@@ -186,10 +188,8 @@ export class ConversationService {
 
     if (!schedule) return null;
 
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000)
-      .toISOString()
-      .slice(0, 10);
+    const today = localTodayIso();
+    const yesterday = localOffsetIso(-1);
 
     const { data: items } = await db
       .from("schedule_items")

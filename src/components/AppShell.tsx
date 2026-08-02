@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
@@ -23,6 +24,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     router.replace("/sign-in");
     router.refresh();
+  };
+
+  const exportData = async () => {
+    try {
+      const res = await fetch("/api/export");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error?.message ?? "Erro ao exportar");
+      const blob = new Blob([JSON.stringify(json.data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `ia-estudar-export-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success("Export baixado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha no export");
+    }
   };
 
   return (
@@ -58,6 +79,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <ThemeSwitcher />
+          <Button variant="neutral" size="sm" onClick={() => void exportData()}>
+            Export
+          </Button>
           <Button variant="neutral" size="sm" onClick={() => void signOut()}>
             Sair
           </Button>

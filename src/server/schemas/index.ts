@@ -57,6 +57,7 @@ export const generatedQuestionSchema = z.object({
   prompt: z.string().trim().min(1).max(4000),
   answer: z.string().trim().min(1).max(4000),
   choices: z.array(z.string().trim().min(1)).max(8).optional(),
+  kind: z.enum(["qa", "multiple_choice", "open", "cloze"]).optional(),
 });
 
 export const generateFormSchema = z.object({
@@ -67,6 +68,7 @@ export const generateFormSchema = z.object({
   confirmed: z.boolean().optional().default(false),
   /** Questões editadas no preview — se presentes no confirm, não regenera com IA. */
   questions: z.array(generatedQuestionSchema).min(1).max(50).optional(),
+  scheduleItemId: z.string().uuid().optional().nullable(),
 });
 
 export const fsrsRatingSchema = z.enum(["again", "hard", "good", "easy"]);

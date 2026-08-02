@@ -25,6 +25,8 @@ export type ScheduleItem = {
   duration_minutes: number;
   topic: string | null;
   status: string;
+  document_id?: string | null;
+  folder_id?: string | null;
 };
 
 export type CalendarView = "week" | "month" | "year";
@@ -98,12 +100,13 @@ export function ScheduleCalendar({
             size="sm"
             variant="neutral"
             className="h-7 px-2 text-[10px]"
-            onClick={() =>
+            onClick={(e) => {
+              e.stopPropagation();
               onToggleStatus(
                 item.id,
                 item.status === "done" ? "pending" : "done",
-              )
-            }
+              );
+            }}
           >
             {item.status === "done" ? "Reabrir" : "Feito"}
           </Button>
@@ -112,10 +115,63 @@ export function ScheduleCalendar({
             size="sm"
             variant="neutral"
             className="h-7 px-2 text-[10px]"
-            onClick={() => onToggleStatus(item.id, "skipped")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleStatus(item.id, "skipped");
+            }}
           >
             Pular
           </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const renderMonthItem = (item: ScheduleItem, accent: string) => (
+    <div
+      key={item.id}
+      draggable={Boolean(onReschedule)}
+      onDragStart={() => setDraggingId(item.id)}
+      onDragEnd={() => setDraggingId(null)}
+      className={cn(
+        "rounded-base border border-border px-1 py-0.5",
+        draggingId === item.id && "opacity-50",
+      )}
+      style={{ background: accent }}
+    >
+      <button
+        type="button"
+        onClick={() => onItemClick(item)}
+        className="block w-full truncate text-left text-[10px] font-heading"
+        title={item.topic ?? "Sessão"}
+      >
+        {item.topic ?? "Sessão"}
+      </button>
+      {onToggleStatus ? (
+        <div className="mt-0.5 flex gap-0.5">
+          <button
+            type="button"
+            className="rounded-base border border-border bg-secondary-background px-1 py-0 text-[8px] font-heading uppercase shadow-shadow hover:translate-x-px hover:translate-y-px hover:shadow-none"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleStatus(
+                item.id,
+                item.status === "done" ? "pending" : "done",
+              );
+            }}
+          >
+            {item.status === "done" ? "↩" : "Feito"}
+          </button>
+          <button
+            type="button"
+            className="rounded-base border border-border bg-secondary-background px-1 py-0 text-[8px] font-heading uppercase shadow-shadow hover:translate-x-px hover:translate-y-px hover:shadow-none"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleStatus(item.id, "skipped");
+            }}
+          >
+            Pular
+          </button>
         </div>
       ) : null}
     </div>
@@ -302,21 +358,9 @@ export function ScheduleCalendar({
             >
               <p className="font-heading text-xs">{format(day, "d")}</p>
               <div className="mt-1 space-y-1">
-                {dayItems.slice(0, 3).map((item, i) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    draggable={Boolean(onReschedule)}
-                    onDragStart={() => setDraggingId(item.id)}
-                    onDragEnd={() => setDraggingId(null)}
-                    onClick={() => onItemClick(item)}
-                    className="block w-full truncate rounded-base border border-border px-1 py-0.5 text-left text-[10px] font-heading"
-                    style={{ background: accents[i % accents.length] }}
-                    title={item.topic ?? "Sessão"}
-                  >
-                    {item.topic ?? "Sessão"}
-                  </button>
-                ))}
+                {dayItems.slice(0, 3).map((item, i) =>
+                  renderMonthItem(item, accents[i % accents.length]!),
+                )}
                 {dayItems.length > 3 ? (
                   <p className="text-[10px] opacity-60">+{dayItems.length - 3}</p>
                 ) : null}

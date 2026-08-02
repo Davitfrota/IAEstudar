@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { mapAuthError } from "@/lib/auth-errors";
+import { assertAuthRateLimit } from "@/server/rate-limit";
 
 type Body = { email?: string; password?: string };
 
@@ -33,6 +34,10 @@ async function createAuthClient() {
 
 export async function POST(request: Request) {
   try {
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    await assertAuthRateLimit(ip);
+
     const body = (await request.json()) as Body;
     const email = body.email?.trim() ?? "";
     const password = body.password ?? "";

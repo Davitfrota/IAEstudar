@@ -293,6 +293,26 @@ export class FormRepository {
     return count ?? 0;
   }
 
+  async softDeleteQuestions(formId: string): Promise<void> {
+    const { error } = await this.db
+      .from("form_questions")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("form_id", formId)
+      .is("deleted_at", null);
+
+    if (error) throw error;
+  }
+
+  async clearStale(userId: string, formId: string): Promise<void> {
+    const { error } = await this.db
+      .from("forms")
+      .update({ is_stale: false })
+      .eq("id", formId)
+      .eq("user_id", userId);
+
+    if (error) throw error;
+  }
+
   async softDelete(userId: string, formId: string): Promise<void> {
     const { error } = await this.db
       .from("forms")

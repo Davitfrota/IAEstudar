@@ -1,6 +1,9 @@
 import type OpenAI from "openai";
 import { createGroqClient, groqModel } from "@/lib/ai/groq";
-import { groqToolCompletion } from "@/lib/ai/groq-tools";
+import {
+  groqToolCompletion,
+  hasPlanRequirementsInHistory,
+} from "@/lib/ai/groq-tools";
 import { createDbClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { assertAgentChatRateLimit } from "@/server/rate-limit";
@@ -34,20 +37,29 @@ COMPORTAMENTO:
 - Feche cada sessão de acompanhamento com um resumo curto: o que foi visto, o que ficou pendente, o que vem a seguir.
 
 TÍTULO DA CONVERSA:
-- Na PRIMEIRA resposta desta conversa (e sempre que propor um plano novo), a primeira linha DEVE ser exatamente:
-  Título: <nome curto do plano>
+- Só use a linha Título quando for propor/confirmar o tema do plano (não na fase só de perguntas).
+- Formato da primeira linha: Título: <nome curto do plano>
   Ex.: "Título: Cálculo — prova 15/08". Sem markdown nessa linha. Depois continue normalmente.
+
+MARKDOWN:
+- Depois da linha Título (se houver), escreva o resto em Markdown claro e legível.
+- Use: **negrito** para ênfase, listas numeradas/com marcadores, ### subtítulos curtos, \`código\` só quando útil, e tabelas só se ajudarem.
+- Prefira listas para perguntas (objetivo / prazo / nível) e para resumos de sessão.
+- Não use HTML cru nem imagens.
 
 FERRAMENTAS:
 - Use as ferramentas MCP disponíveis; nunca invente IDs.
 - Setup completo (pasta + documento + cronograma e/ou flashcards): UMA ÚNICA ferramenta propose_study_plan — não chame create_folder/create_document/generate_* em paralelo.
-- Estrutura em propose_study_plan:
-  1) Pasta com o nome do tema
-  2) documentTitle/documentContent = RESUMO do tema (≥50 chars, útil)
-  3) organizationMode: "by_topic" (default) OU "by_day" conforme o aluno pedir
-  4) lessonNotes: título+conteúdo (≥50 chars) para cada arquivo extra
-  5) Cronograma até targetDate cobrindo TODOS os dias
-  6) Flashcards a partir do resumo, se pedido
+- Estrutura em propose_study_plan (organizationMode by_topic, default):
+  1) Pasta raiz do tema
+  2) Resumo geral do curso
+  3) Uma subpasta por tópico
+  4) Sessões (plano do dia) dentro de cada tópico — 1 arquivo por dia até targetDate, round-robin nos tópicos
+  5) Cronograma cobrindo todos os dias
+  6) Flashcards do resumo + formulário/quiz do dia por sessão (quando includeForm)
+- organizationMode by_day: pasta "Sessões" com um plano por dia
+- Em lessonNotes: cada item precisa de conteúdo DIDÁTICO longo (≥400 caracteres): definição, mecanismo, exemplo, erro comum — não uma frase sola. O sistema monta a página da sessão em cima disso.
+- Em documentContent: resumo GERAL do curso completo e condensado (≥500 caracteres), cobrindo todos os tópicos.
 - Cronograma bem feito: tópicos progressivos; dailyMinutes 25–60; targetDate YYYY-MM-DD futuro.
 - Ações pontuais: use create_folder, create_document, update_document, generate_schedule ou generate_form.
 - Não peça confirmed=true você mesma; a UI confirma o plano.
@@ -157,6 +169,18 @@ export async function* runAgentChat(opts: {
       scheduleId,
     );
     if (ctx) systemContent = `${SYSTEM_PROMPT}\n\n## Contexto deste chat\n${ctx}`;
+
+    // Injeta revisões vencidas no 1º turno com cronograma (não só via prompt)
+    try {
+      const due = await executeMcpTool({ userId: opts.userId }, "list_due", {
+        limit: 8,
+      });
+      if (due.status === "success" && due.data) {
+        systemContent += `\n\n## Revisões vencidas (list_due)\n${JSON.stringify(due.data).slice(0, 2000)}`;
+      }
+    } catch {
+      // ignore
+    }
   }
 
   const messages: ChatMessage[] = [
@@ -172,12 +196,22 @@ export async function* runAgentChat(opts: {
     }
   }
 
+  const historyComplete = hasPlanRequirementsInHistory(
+    (history ?? [])
+      .filter((r) => r.role === "user" || r.role === "assistant")
+      .map((r) => ({
+        role: String(r.role),
+        content: String(r.content ?? ""),
+      })),
+  );
+
   const client = createGroqClient();
   const tools = openaiTools();
   const model = groqModel();
 
   let assistantText = "";
   let turns = 0;
+  let proposedPlan = false;
 
   while (turns < 6) {
     turns += 1;
@@ -193,6 +227,7 @@ export async function* runAgentChat(opts: {
         model,
         messages,
         tools,
+        historyComplete,
       });
       content = result.content;
       toolCalls = result.toolCalls;
@@ -217,6 +252,9 @@ export async function* runAgentChat(opts: {
 
     const planable = toolCalls.filter((c) => PLANABLE_TOOLS.has(c.name));
     const immediate = toolCalls.filter((c) => !PLANABLE_TOOLS.has(c.name));
+    if (planable.some((c) => c.name === "propose_study_plan")) {
+      proposedPlan = true;
+    }
 
     messages.push({
       role: "assistant",
@@ -275,7 +313,11 @@ export async function* runAgentChat(opts: {
         const expanded = expandToPlanSteps(call.name, call.input);
 
         for (const step of expanded) {
-          if (step.tool === "generate_form" && !step.input._deferredPreview) {
+          if (
+            step.tool === "generate_form" &&
+            !step.input._deferredPreview &&
+            step.input._formRole !== "daily"
+          ) {
             try {
               const preview = await new FormService().previewGenerate(
                 opts.userId,
@@ -335,7 +377,7 @@ export async function* runAgentChat(opts: {
             {
               role: "user",
               content:
-                "Responda como Nara. Comece com a linha 'Título: <nome curto do plano>'. Depois explique o raciocínio da divisão (por que esses dias e essa ordem de tópicos) em poucas frases e peça para confirmar ou ajustar na UI.",
+                "Responda como Nara em Markdown. Comece com a linha 'Título: <nome curto do plano>' (sem markdown nessa linha). Depois explique o raciocínio da divisão com listas/subtítulos e peça para confirmar ou ajustar na UI.",
             },
           ],
           stream: true,
@@ -356,16 +398,22 @@ export async function* runAgentChat(opts: {
     if (immediate.length === 0) break;
   }
 
+  const planTitle = extractConversationTitle(assistantText);
+  const persistedText = assistantText
+    .replace(/^\s*T[ií]tulo\s*:\s*.+\n?/im, "")
+    .trim();
+
   await db.from("conversation_messages").insert({
     conversation_id: conversationId,
     user_id: opts.userId,
     role: "assistant",
-    content: assistantText,
+    content: persistedText || assistantText,
   });
 
-  const planTitle = extractConversationTitle(assistantText);
   if (planTitle) {
-    await conversations.touchTitle(opts.userId, conversationId, planTitle);
+    await conversations.touchTitle(opts.userId, conversationId, planTitle, {
+      force: proposedPlan,
+    });
     yield { type: "conversationTitle", title: planTitle };
   }
 
