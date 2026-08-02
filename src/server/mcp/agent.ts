@@ -85,6 +85,7 @@ export async function* runAgentChat(opts: {
     .from("conversation_messages")
     .select("role, content, tool_calls")
     .eq("conversation_id", conversationId)
+    .eq("user_id", opts.userId)
     .order("created_at", { ascending: true })
     .limit(40);
 

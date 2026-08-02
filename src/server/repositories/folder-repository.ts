@@ -41,6 +41,31 @@ export class FolderRepository {
     return data as Folder;
   }
 
+  /**
+   * Antes do soft-delete: documentos vão para a raiz e subpastas
+   * viram raízes. Soft-delete só da pasta alvo não dispara ON DELETE
+   * SET NULL — sem isso, filhos ficam órfãos e somem da árvore.
+   */
+  async detachContents(userId: string, folderId: string): Promise<void> {
+    const { error: docsError } = await this.db
+      .from("documents")
+      .update({ folder_id: null })
+      .eq("user_id", userId)
+      .eq("folder_id", folderId)
+      .is("deleted_at", null);
+
+    if (docsError) throw docsError;
+
+    const { error: foldersError } = await this.db
+      .from("folders")
+      .update({ parent_folder_id: null })
+      .eq("user_id", userId)
+      .eq("parent_folder_id", folderId)
+      .is("deleted_at", null);
+
+    if (foldersError) throw foldersError;
+  }
+
   async softDelete(userId: string, folderId: string): Promise<void> {
     const { error } = await this.db
       .from("folders")
