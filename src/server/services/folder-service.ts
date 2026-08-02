@@ -29,6 +29,9 @@ export class FolderService {
     if (!folder) {
       throw new AppError("Pasta não encontrada", 404, "FOLDER_NOT_FOUND");
     }
+    // Evita "apagão" na UI: docs/subpastas com FK para pasta soft-deletada
+    // deixam de aparecer na árvore (só raízes e folder_id null são renderizados).
+    await this.repo.detachContents(userId, folderId);
     await this.repo.softDelete(userId, folderId);
   }
 }
