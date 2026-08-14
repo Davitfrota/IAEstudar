@@ -1,5 +1,6 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ensureAppUser } from "@/server/ensure-app-user";
 import { AppError } from "@/server/http";
 import type { AppUser } from "@/server/types";
 
@@ -10,6 +11,8 @@ export async function requireClerkUserId(): Promise<string> {
   }
   return userId;
 }
+
+export { ensureAppUser };
 
 /** Resolve (e se preciso cria) o usuário interno a partir do Clerk. */
 export async function requireAppUser(): Promise<AppUser> {
@@ -36,15 +39,5 @@ export async function requireAppUser(): Promise<AppUser> {
     clerkUser?.emailAddresses?.[0]?.emailAddress ??
     null;
 
-  const { data: created, error: insertError } = await supabase
-    .from("users")
-    .insert({ clerk_id: clerkId, email })
-    .select("id, clerk_id, email")
-    .single();
-
-  if (insertError || !created) {
-    throw new AppError("Falha ao sincronizar usuário", 500, "USER_SYNC");
-  }
-
-  return created as AppUser;
+  return ensureAppUser(supabase, clerkId, email);
 }
