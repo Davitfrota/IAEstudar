@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { reviewResultFromExisting } from "../review-idempotency.ts";
-import type { FsrsCardState } from "../../types.ts";
+import { reviewResultFromExisting } from "./review-idempotency.ts";
+import type { FsrsCardState } from "../types.ts";
 
 describe("reviewResultFromExisting", () => {
   it("devolve nextDue e newState a partir da revisão já gravada", () => {
