@@ -232,6 +232,7 @@ const handlers: Record<string, ToolHandler> = {
         ctx.userId,
         input.formQuestionId,
         input.rating,
+        input.idempotencyKey,
       );
       return { status: "success", data: result };
     }),

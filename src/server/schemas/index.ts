@@ -58,6 +58,8 @@ export const fsrsRatingSchema = z.enum(["again", "hard", "good", "easy"]);
 export const recordReviewSchema = z.object({
   formQuestionId: z.string().uuid(),
   rating: fsrsRatingSchema,
+  /** Mesmo UUID em retries do mesmo clique — evita avançar FSRS duas vezes. */
+  idempotencyKey: z.string().uuid().optional(),
 });
 
 export const listDueSchema = z.object({

@@ -39,11 +39,17 @@ export default function PracticePage() {
   }, [params.formId]);
 
   const onRate = async (questionId: string, rating: FsrsRating) => {
+    const idempotencyKey = crypto.randomUUID();
+
     const attempt = async () => {
       const res = await fetch("/api/forms/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ formQuestionId: questionId, rating }),
+        body: JSON.stringify({
+          formQuestionId: questionId,
+          rating,
+          idempotencyKey,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error?.message ?? "Falha ao registrar");
@@ -52,9 +58,19 @@ export default function PracticePage() {
 
     try {
       await attempt();
-    } catch {
+    } catch (firstError) {
+      // Retry reutiliza a mesma chave; o backend não reaplica FSRS.
       await new Promise((r) => setTimeout(r, 600));
-      await attempt();
+      try {
+        await attempt();
+      } catch {
+        const message =
+          firstError instanceof Error ? firstError.message : "Falha ao registrar";
+        toast.error(message);
+        throw firstError instanceof Error
+          ? firstError
+          : new Error("Falha ao registrar");
+      }
     }
   };
 
