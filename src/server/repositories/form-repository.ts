@@ -218,22 +218,91 @@ export class FormRepository {
     return data as FormQuestion;
   }
 
+  /**
+   * Aplica stateAfter só se o card ainda estiver em stateBefore
+   * (cura insert de review sem update; não reverte revisões mais novas).
+   */
+  async updateFsrsStateIfMatches(
+    questionId: string,
+    expected: FsrsCardState,
+    state: FsrsCardState,
+  ): Promise<boolean> {
+    const { data, error } = await this.db
+      .from("form_questions")
+      .update({
+        fsrs_state: state.state,
+        fsrs_due: state.due,
+        fsrs_stability: state.stability,
+        fsrs_difficulty: state.difficulty,
+        fsrs_elapsed_days: state.elapsed_days,
+        fsrs_scheduled_days: state.scheduled_days,
+        fsrs_reps: state.reps,
+        fsrs_lapses: state.lapses,
+        fsrs_last_review: state.last_review,
+      })
+      .eq("id", questionId)
+      .eq("fsrs_reps", expected.reps)
+      .eq("fsrs_due", expected.due)
+      .eq("fsrs_lapses", expected.lapses)
+      .select("id")
+      .maybeSingle();
+
+    if (error) throw error;
+    return data != null;
+  }
+
   async insertReview(input: {
     formQuestionId: string;
     userId: string;
     rating: string;
     stateBefore: FsrsCardState;
     stateAfter: FsrsCardState;
-  }): Promise<void> {
+    idempotencyKey?: string;
+  }): Promise<"inserted" | "duplicate"> {
     const { error } = await this.db.from("form_reviews").insert({
       form_question_id: input.formQuestionId,
       user_id: input.userId,
       rating: input.rating,
       state_before: input.stateBefore,
       state_after: input.stateAfter,
+      idempotency_key: input.idempotencyKey ?? null,
     });
 
+    if (error) {
+      // Unique violation on idempotency_key (23505) = retry after success
+      if (error.code === "23505" && input.idempotencyKey) {
+        return "duplicate";
+      }
+      throw error;
+    }
+    return "inserted";
+  }
+
+  async findReviewByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<{
+    rating: string;
+    form_question_id: string;
+    state_before: FsrsCardState;
+    state_after: FsrsCardState;
+  } | null> {
+    const { data, error } = await this.db
+      .from("form_reviews")
+      .select("rating, form_question_id, state_before, state_after")
+      .eq("user_id", userId)
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+
     if (error) throw error;
+    if (!data) return null;
+
+    return {
+      rating: data.rating as string,
+      form_question_id: data.form_question_id as string,
+      state_before: data.state_before as FsrsCardState,
+      state_after: data.state_after as FsrsCardState,
+    };
   }
 
   async countDue(userId: string): Promise<number> {

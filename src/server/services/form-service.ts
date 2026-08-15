@@ -24,6 +24,7 @@ import {
   PROMPT_OPEN_FORM,
   PROMPT_QUIZ,
 } from "@/server/prompts/forms";
+import { reviewResultFromExisting } from "@/server/services/review-idempotency";
 
 const MIN_CONTENT_LENGTH = 50;
 
@@ -279,7 +280,27 @@ export class FormService {
     return parsed.questions.slice(0, input.questionCount);
   }
 
-  async recordReview(userId: string, formQuestionId: string, rating: FsrsRating) {
+  async recordReview(
+    userId: string,
+    formQuestionId: string,
+    rating: FsrsRating,
+    idempotencyKey?: string,
+  ) {
+    if (idempotencyKey) {
+      const existing = await this.repo.findReviewByIdempotencyKey(
+        userId,
+        idempotencyKey,
+      );
+      if (existing) {
+        await this.repo.updateFsrsStateIfMatches(
+          existing.form_question_id,
+          existing.state_before,
+          existing.state_after,
+        );
+        return reviewResultFromExisting(existing);
+      }
+    }
+
     const question = await this.repo.getQuestionOwned(userId, formQuestionId);
     if (!question) {
       throw new AppError("Questão não encontrada", 404, "QUESTION_NOT_FOUND");
@@ -291,13 +312,29 @@ export class FormService {
     const result = this.scheduler.next(beforeCard, now, ratingMap[rating]);
     const stateAfter = fromFsrsCard(result.card);
 
-    await this.repo.insertReview({
+    const insertResult = await this.repo.insertReview({
       formQuestionId,
       userId,
       rating,
       stateBefore,
       stateAfter,
+      idempotencyKey,
     });
+
+    if (insertResult === "duplicate" && idempotencyKey) {
+      const existing = await this.repo.findReviewByIdempotencyKey(
+        userId,
+        idempotencyKey,
+      );
+      if (existing) {
+        await this.repo.updateFsrsStateIfMatches(
+          existing.form_question_id,
+          existing.state_before,
+          existing.state_after,
+        );
+        return reviewResultFromExisting(existing);
+      }
+    }
 
     await this.repo.updateFsrsState(formQuestionId, stateAfter);
 

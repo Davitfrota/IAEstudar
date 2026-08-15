@@ -50,8 +50,14 @@ export function PracticeQueue({ questions, onRate }: Props) {
     setPending(true);
     try {
       await onRate(current.id, rating);
-      const nextQueue = queue.filter((q) => q.id !== current.id);
-      setQueue(nextQueue);
+      // Again: card volta ao fim da sessão (intervalo curto de learning).
+      // Demais ratings: sai da fila até o próximo ciclo de due.
+      if (rating === "again") {
+        const rest = queue.filter((q) => q.id !== current.id);
+        setQueue([...rest, current]);
+      } else {
+        setQueue(queue.filter((q) => q.id !== current.id));
+      }
       setIndex(0);
       setRevealed(false);
     } finally {
