@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
+import {
+  historyToAnthropicMessages,
+  type PersistedToolCall,
+} from "@/server/mcp/agent-history";
 import { assertAgentChatRateLimit } from "@/server/rate-limit";
 import { anthropicTools, executeMcpTool } from "@/server/mcp/tools";
 
@@ -88,23 +92,14 @@ export async function* runAgentChat(opts: {
     .order("created_at", { ascending: true })
     .limit(40);
 
-  type Msg = Anthropic.MessageParam;
-  const messages: Msg[] = [];
-
-  for (const row of history ?? []) {
-    if (row.role === "user" || row.role === "assistant") {
-      messages.push({
-        role: row.role,
-        content: row.content || "(vazio)",
-      });
-    }
-  }
+  const messages = historyToAnthropicMessages(history ?? []);
 
   const client = new Anthropic({ apiKey });
   const tools = anthropicTools() as Anthropic.Tool[];
 
   let assistantText = "";
   let turns = 0;
+  const persistedTools: PersistedToolCall[] = [];
 
   while (turns < 6) {
     turns += 1;
@@ -153,6 +148,15 @@ export async function* runAgentChat(opts: {
           : result.status === "error"
             ? "error"
             : "executed";
+
+      persistedTools.push({
+        id: tool.id,
+        name: tool.name,
+        input: tool.input,
+        status,
+        result: result.data,
+        error: result.error,
+      });
 
       yield {
         type: "toolCall",
@@ -210,6 +214,7 @@ export async function* runAgentChat(opts: {
     user_id: opts.userId,
     role: "assistant",
     content: assistantText,
+    tool_calls: persistedTools.length > 0 ? persistedTools : null,
   });
 
   yield { type: "done" };
