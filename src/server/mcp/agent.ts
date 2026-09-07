@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
+import { toChronologicalHistoryWindow } from "@/server/mcp/recent-history";
 import { assertAgentChatRateLimit } from "@/server/rate-limit";
 import { anthropicTools, executeMcpTool } from "@/server/mcp/tools";
 
@@ -81,17 +82,21 @@ export async function* runAgentChat(opts: {
     content: opts.message,
   });
 
-  const { data: history } = await db
+  // Mais recentes primeiro + reverse: ASC+LIMIT descartaria o turno atual
+  // assim que a conversa ultrapassasse 40 linhas.
+  const { data: newestHistory } = await db
     .from("conversation_messages")
     .select("role, content, tool_calls")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(40);
+
+  const history = toChronologicalHistoryWindow(newestHistory ?? []);
 
   type Msg = Anthropic.MessageParam;
   const messages: Msg[] = [];
 
-  for (const row of history ?? []) {
+  for (const row of history) {
     if (row.role === "user" || row.role === "assistant") {
       messages.push({
         role: row.role,
