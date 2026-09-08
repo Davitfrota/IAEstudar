@@ -8,6 +8,7 @@ import "@blocknote/core/fonts/inter.css";
 import "@mantine/core/styles.css";
 import "@blocknote/mantine/style.css";
 import type { Block } from "@blocknote/core";
+import { extractContentText } from "@/lib/content-text";
 
 type Document = {
   id: string;
@@ -83,15 +84,7 @@ function EditorBody({ document, onChange, isStale }: Props) {
           editor={editor}
           onChange={() => {
             const blocks = editor.document;
-            const text = editor.document
-              .map((block) => {
-                const content = (
-                  block as { content?: Array<{ text?: string }> }
-                ).content;
-                if (!Array.isArray(content)) return "";
-                return content.map((c) => c.text ?? "").join("");
-              })
-              .join("\n");
+            const text = extractContentText(blocks);
             scheduleSave({ content: blocks, contentText: text });
           }}
         />
