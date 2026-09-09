@@ -6,6 +6,7 @@ import type {
   CreateDocumentInput,
   UpdateDocumentInput,
 } from "@/server/schemas";
+import type { Document } from "@/server/types";
 
 function plainTextFromInitial(content?: string): string {
   return (content ?? "").trim();
@@ -42,6 +43,19 @@ export class DocumentService {
 
   list(userId: string, cursor?: string, limit = 50) {
     return this.repo.list(userId, cursor, limit);
+  }
+
+  /** Carrega todos os documentos (árvore Pastas não pode truncar silenciosamente). */
+  async listAll(userId: string, pageSize = 50) {
+    const documents: Document[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await this.repo.list(userId, cursor, pageSize);
+      documents.push(...page.documents);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return documents;
   }
 
   async get(userId: string, documentId: string) {

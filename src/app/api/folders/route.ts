@@ -7,12 +7,18 @@ export async function GET(request: Request) {
   try {
     const user = await requireAppUser();
     const url = new URL(request.url);
-    const { cursor, limit } = paginationSchema.parse({
+    const { cursor, limit, all } = paginationSchema.parse({
       cursor: url.searchParams.get("cursor") ?? undefined,
       limit: url.searchParams.get("limit") ?? undefined,
+      all: url.searchParams.get("all") ?? undefined,
     });
-    const folders = await new FolderService().list(user.id, cursor, limit);
-    return ok({ folders });
+    const service = new FolderService();
+    if (all) {
+      const folders = await service.listAll(user.id, limit);
+      return ok({ folders, nextCursor: null });
+    }
+    const { folders, nextCursor } = await service.list(user.id, cursor, limit);
+    return ok({ folders, nextCursor });
   } catch (error) {
     return fail(error);
   }

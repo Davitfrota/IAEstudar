@@ -1,26 +1,36 @@
 import type { AdminClient } from "@/lib/supabase/admin";
+import {
+  decodeListCursor,
+  listCursorOrFilter,
+  nextListCursor,
+} from "@/lib/list-cursor";
 import type { Folder } from "@/server/types";
 
 export class FolderRepository {
   constructor(private db: AdminClient) {}
 
-  async list(userId: string, cursor?: string, limit = 50): Promise<Folder[]> {
+  async list(
+    userId: string,
+    cursor?: string,
+    limit = 50,
+  ): Promise<{ folders: Folder[]; nextCursor: string | null }> {
     let query = this.db
       .from("folders")
       .select("*")
       .eq("user_id", userId)
       .is("deleted_at", null)
-      .order("position", { ascending: true })
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .limit(limit);
 
     if (cursor) {
-      query = query.gt("id", cursor);
+      query = query.or(listCursorOrFilter(decodeListCursor(cursor)));
     }
 
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []) as Folder[];
+    const folders = (data ?? []) as Folder[];
+    return { folders, nextCursor: nextListCursor(folders, limit) };
   }
 
   async create(
