@@ -1,26 +1,36 @@
 import type { AdminClient } from "@/lib/supabase/admin";
+import {
+  decodeListCursor,
+  listCursorOrFilter,
+  nextListCursor,
+} from "@/lib/list-cursor";
 import type { Document } from "@/server/types";
 
 export class DocumentRepository {
   constructor(private db: AdminClient) {}
 
-  async list(userId: string, cursor?: string, limit = 50): Promise<Document[]> {
+  async list(
+    userId: string,
+    cursor?: string,
+    limit = 50,
+  ): Promise<{ documents: Document[]; nextCursor: string | null }> {
     let query = this.db
       .from("documents")
       .select("*")
       .eq("user_id", userId)
       .is("deleted_at", null)
-      .order("position", { ascending: true })
       .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
       .limit(limit);
 
     if (cursor) {
-      query = query.gt("id", cursor);
+      query = query.or(listCursorOrFilter(decodeListCursor(cursor)));
     }
 
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []) as Document[];
+    const documents = (data ?? []) as Document[];
+    return { documents, nextCursor: nextListCursor(documents, limit) };
   }
 
   async getOwned(userId: string, documentId: string): Promise<Document | null> {

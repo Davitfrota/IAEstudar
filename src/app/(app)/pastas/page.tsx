@@ -32,9 +32,11 @@ export default function PastasPage() {
   const load = async () => {
     setLoading(true);
     try {
+      // all=1: árvore precisa do conjunto completo — o default limit=50
+      // truncava pastas/documentos silenciosamente.
       const [fRes, dRes] = await Promise.all([
-        fetch("/api/folders"),
-        fetch("/api/documents"),
+        fetch("/api/folders?all=1"),
+        fetch("/api/documents?all=1"),
       ]);
       const fJson = await fRes.json();
       const dJson = await dRes.json();

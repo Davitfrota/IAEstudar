@@ -2,12 +2,26 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { FolderRepository } from "@/server/repositories/folder-repository";
 import type { CreateFolderInput } from "@/server/schemas";
+import type { Folder } from "@/server/types";
 
 export class FolderService {
   private repo = new FolderRepository(createAdminClient());
 
   list(userId: string, cursor?: string, limit = 50) {
     return this.repo.list(userId, cursor, limit);
+  }
+
+  /** Carrega todas as pastas (árvore Pastas não pode truncar silenciosamente). */
+  async listAll(userId: string, pageSize = 50) {
+    const folders: Folder[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await this.repo.list(userId, cursor, pageSize);
+      folders.push(...page.folders);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return folders;
   }
 
   async create(userId: string, input: CreateFolderInput) {

@@ -72,8 +72,14 @@ export const agentChatSchema = z.object({
 });
 
 export const paginationSchema = z.object({
-  cursor: z.string().uuid().optional(),
-  limit: z.coerce.number().int().min(1).max(50).optional().default(50),
+  /** Cursor opaco (created_at, id) — não é mais UUID da linha. */
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  /** Quando true, o servidor pagina internamente e devolve a coleção completa. */
+  all: z
+    .union([z.literal("true"), z.literal("false"), z.literal("1"), z.literal("0")])
+    .optional()
+    .transform((v): boolean => v === "true" || v === "1"),
 });
 
 export type CreateFolderInput = z.infer<typeof createFolderSchema>;
