@@ -90,6 +90,7 @@ export class FormRepository {
       .eq("id", questionId)
       .eq("forms.user_id", userId)
       .is("deleted_at", null)
+      .is("forms.deleted_at", null)
       .maybeSingle();
 
     if (error) throw error;
@@ -106,10 +107,30 @@ export class FormRepository {
   ): Promise<FormQuestionSummary[]> {
     const dueAt = opts.date ?? new Date().toISOString();
 
+    // Filter by folder in SQL *before* limit(100). Post-filtering in memory
+    // after the global due-date limit returned false empties when ≥100 dues
+    // existed in other folders.
+    let sourceDocumentIds: string[] | undefined;
+    if (opts.folderId) {
+      const { data: docs, error: docsError } = await this.db
+        .from("documents")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("folder_id", opts.folderId)
+        .is("deleted_at", null);
+
+      if (docsError) throw docsError;
+
+      sourceDocumentIds = (docs ?? []).map((d) => d.id as string);
+      if (sourceDocumentIds.length === 0) {
+        return [];
+      }
+    }
+
     let query = this.db
       .from("form_questions")
       .select(
-        "id, form_id, type, prompt, fsrs_due, fsrs_state, position, forms!inner(user_id, title, deleted_at, source_document_id, documents:source_document_id(folder_id))",
+        "id, form_id, type, prompt, fsrs_due, fsrs_state, position, forms!inner(user_id, title, deleted_at, source_document_id)",
       )
       .eq("forms.user_id", userId)
       .is("deleted_at", null)
@@ -118,46 +139,34 @@ export class FormRepository {
       .order("fsrs_due", { ascending: true })
       .limit(100);
 
+    if (sourceDocumentIds) {
+      query = query.in("forms.source_document_id", sourceDocumentIds);
+    }
+
     const { data, error } = await query;
     if (error) throw error;
 
     type DueRow = FormQuestionSummary & {
       forms:
-        | {
-            title: string;
-            documents: { folder_id: string | null } | { folder_id: string | null }[] | null;
-          }
-        | Array<{
-            title: string;
-            documents: { folder_id: string | null } | { folder_id: string | null }[] | null;
-          }>;
+        | { title: string }
+        | Array<{ title: string }>;
     };
 
     const rows = (data ?? []) as unknown as DueRow[];
 
-    return rows
-      .filter((row) => {
-        if (!opts.folderId) return true;
-        const forms = Array.isArray(row.forms) ? row.forms[0] : row.forms;
-        const docs = forms?.documents;
-        const folderId = Array.isArray(docs)
-          ? docs[0]?.folder_id
-          : docs?.folder_id;
-        return folderId === opts.folderId;
-      })
-      .map((row) => {
-        const forms = Array.isArray(row.forms) ? row.forms[0] : row.forms;
-        return {
-          id: row.id,
-          form_id: row.form_id,
-          type: row.type,
-          prompt: row.prompt,
-          fsrs_due: row.fsrs_due,
-          fsrs_state: row.fsrs_state,
-          position: row.position,
-          form_title: forms?.title,
-        };
-      });
+    return rows.map((row) => {
+      const forms = Array.isArray(row.forms) ? row.forms[0] : row.forms;
+      return {
+        id: row.id,
+        form_id: row.form_id,
+        type: row.type,
+        prompt: row.prompt,
+        fsrs_due: row.fsrs_due,
+        fsrs_state: row.fsrs_state,
+        position: row.position,
+        form_title: forms?.title,
+      };
+    });
   }
 
   async listQuestions(formId: string): Promise<FormQuestion[]> {
