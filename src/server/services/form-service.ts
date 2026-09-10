@@ -170,8 +170,8 @@ export class FormService {
   }
 
   async generate(userId: string, input: GenerateFormInput) {
-    assertGenerateRateLimit(userId, "generate_form");
-
+    // Validate before consuming the daily quota — bad/missing document IDs
+    // (common when the agent retries with invented UUIDs) must not lock the user out.
     const doc = await this.documents.getOwned(userId, input.sourceDocumentId);
     if (!doc) {
       throw new AppError("Documento não encontrado", 404, "DOCUMENT_NOT_FOUND");
@@ -183,6 +183,8 @@ export class FormService {
         "DOCUMENT_TOO_SHORT",
       );
     }
+
+    assertGenerateRateLimit(userId, "generate_form");
 
     const questions = await this.generateQuestionsWithAi({
       type: input.type,
@@ -199,21 +201,27 @@ export class FormService {
     });
 
     const qType = questionTypeForForm(input.type);
-    const created = await this.repo.createQuestions(
-      questions.map((q, index) => ({
-        form_id: form.id,
-        type: qType,
-        prompt: q.prompt,
-        answer: q.answer,
-        choices: q.choices ?? null,
-        position: index,
-      })),
-    );
+    try {
+      const created = await this.repo.createQuestions(
+        questions.map((q, index) => ({
+          form_id: form.id,
+          type: qType,
+          prompt: q.prompt,
+          answer: q.answer,
+          choices: q.choices ?? null,
+          position: index,
+        })),
+      );
 
-    return {
-      formId: form.id,
-      questionsCreated: created.length,
-    };
+      return {
+        formId: form.id,
+        questionsCreated: created.length,
+      };
+    } catch (error) {
+      // Avoid leaving an empty form the agent would retry alongside.
+      await this.repo.softDelete(userId, form.id).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async generateQuestionsWithAi(input: {

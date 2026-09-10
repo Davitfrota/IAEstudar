@@ -25,8 +25,6 @@ export class ScheduleService {
    * e retorna topicsSkipped — não comprime sessões inviáveis.
    */
   async generate(userId: string, input: GenerateScheduleInput) {
-    assertGenerateRateLimit(userId, "generate_schedule");
-
     const start = parseISO(todayIsoDate());
     const end = input.targetDate
       ? parseISO(input.targetDate)
@@ -44,6 +42,9 @@ export class ScheduleService {
       );
     }
 
+    // Quota only after input validation — INSUFFICIENT_TOPICS must not burn the day.
+    assertGenerateRateLimit(userId, "generate_schedule");
+
     const schedule = await this.repo.createSchedule(userId, {
       title: input.title,
       targetDate: input.targetDate ?? formatISO(end, { representation: "date" }),
@@ -51,24 +52,29 @@ export class ScheduleService {
     });
 
     const duration = input.dailyMinutes ?? 30;
-    const items = await this.repo.createItems(
-      topicsFitting.map((topic, index) => ({
-        schedule_id: schedule.id,
-        user_id: userId,
-        scheduled_date: formatISO(addDays(start, index), {
-          representation: "date",
-        }),
-        duration_minutes: duration,
-        topic,
-        position: index,
-      })),
-    );
+    try {
+      const items = await this.repo.createItems(
+        topicsFitting.map((topic, index) => ({
+          schedule_id: schedule.id,
+          user_id: userId,
+          scheduled_date: formatISO(addDays(start, index), {
+            representation: "date",
+          }),
+          duration_minutes: duration,
+          topic,
+          position: index,
+        })),
+      );
 
-    return {
-      scheduleId: schedule.id,
-      itemsCreated: items.length,
-      topicsSkipped,
-      items,
-    };
+      return {
+        scheduleId: schedule.id,
+        itemsCreated: items.length,
+        topicsSkipped,
+        items,
+      };
+    } catch (error) {
+      await this.repo.softDelete(userId, schedule.id).catch(() => undefined);
+      throw error;
+    }
   }
 }
