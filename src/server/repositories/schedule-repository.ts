@@ -79,4 +79,15 @@ export class ScheduleRepository {
     if (error) throw error;
     return (data ?? []) as ScheduleItem[];
   }
+
+  async softDelete(userId: string, scheduleId: string): Promise<void> {
+    const { error } = await this.db
+      .from("study_schedules")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", scheduleId)
+      .eq("user_id", userId)
+      .is("deleted_at", null);
+
+    if (error) throw error;
+  }
 }

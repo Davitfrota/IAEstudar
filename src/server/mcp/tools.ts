@@ -30,6 +30,28 @@ type ToolHandler = (
   input: unknown,
 ) => Promise<ToolResult>;
 
+async function logAuditSafe(
+  audit: AgentActionRepository,
+  entry: {
+    userId: string;
+    toolName: string;
+    input: unknown;
+    output?: unknown;
+    status: "success" | "error" | "pending_confirmation";
+  },
+) {
+  try {
+    await audit.log(entry);
+  } catch (auditError) {
+    // Never convert a successful mutation into a tool error — the model
+    // would retry and create duplicate folders/documents/schedules/forms.
+    console.error(
+      "[audit]",
+      auditError instanceof Error ? auditError.message : "unknown",
+    );
+  }
+}
+
 async function withAudit(
   ctx: ToolContext,
   toolName: string,
@@ -39,7 +61,7 @@ async function withAudit(
   const audit = new AgentActionRepository(createAdminClient());
   try {
     const result = await run();
-    await audit.log({
+    await logAuditSafe(audit, {
       userId: ctx.userId,
       toolName,
       input,
@@ -54,7 +76,7 @@ async function withAudit(
         : error instanceof Error
           ? error.message
           : "Erro desconhecido";
-    await audit.log({
+    await logAuditSafe(audit, {
       userId: ctx.userId,
       toolName,
       input,
