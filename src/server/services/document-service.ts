@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { AppError } from "@/server/http";
 import { DocumentRepository } from "@/server/repositories/document-repository";
 import { FolderRepository } from "@/server/repositories/folder-repository";
+import { FormRepository } from "@/server/repositories/form-repository";
 import type {
   CreateDocumentInput,
   UpdateDocumentInput,
@@ -39,6 +40,7 @@ export function extractContentText(content: unknown, fallback = ""): string {
 export class DocumentService {
   private repo = new DocumentRepository(createAdminClient());
   private folders = new FolderRepository(createAdminClient());
+  private forms = new FormRepository(createAdminClient());
 
   list(userId: string, cursor?: string, limit = 50) {
     return this.repo.list(userId, cursor, limit);
@@ -106,6 +108,9 @@ export class DocumentService {
 
   async softDelete(userId: string, documentId: string) {
     await this.get(userId, documentId);
+    // Soft-delete não dispara ON DELETE CASCADE das FKs — sem isto os
+    // formulários (e filas FSRS) ficam vivos após o documento sumir da UI.
+    await this.forms.softDeleteBySourceDocument(userId, documentId);
     await this.repo.softDelete(userId, documentId);
   }
 }
