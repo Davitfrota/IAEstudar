@@ -262,4 +262,21 @@ export class FormRepository {
 
     if (error) throw error;
   }
+
+  /** Soft-delete de todos os formulários ligados a um documento de origem. */
+  async softDeleteBySourceDocument(
+    userId: string,
+    sourceDocumentId: string,
+  ): Promise<number> {
+    const { data, error } = await this.db
+      .from("forms")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("source_document_id", sourceDocumentId)
+      .is("deleted_at", null)
+      .select("id");
+
+    if (error) throw error;
+    return data?.length ?? 0;
+  }
 }
