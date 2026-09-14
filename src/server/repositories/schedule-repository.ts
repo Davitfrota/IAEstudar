@@ -1,19 +1,27 @@
 import type { AdminClient } from "@/lib/supabase/admin";
+import {
+  fetchAllRows,
+  POSTGREST_MAX_ROWS,
+} from "@/server/fetch-all-rows";
+import { AppError } from "@/server/http";
 import type { ScheduleItem, StudySchedule } from "@/server/types";
+
+const INSERT_CHUNK = 500;
 
 export class ScheduleRepository {
   constructor(private db: AdminClient) {}
 
   async listSchedules(userId: string): Promise<StudySchedule[]> {
-    const { data, error } = await this.db
-      .from("study_schedules")
-      .select("*")
-      .eq("user_id", userId)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false });
-
-    if (error) throw error;
-    return (data ?? []) as StudySchedule[];
+    return fetchAllRows<StudySchedule>((from, to) =>
+      this.db
+        .from("study_schedules")
+        .select("*")
+        .eq("user_id", userId)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
   }
 
   async listItems(
@@ -21,19 +29,20 @@ export class ScheduleRepository {
     from?: string,
     to?: string,
   ): Promise<ScheduleItem[]> {
-    let query = this.db
-      .from("schedule_items")
-      .select("*")
-      .eq("user_id", userId)
-      .order("scheduled_date", { ascending: true })
-      .order("position", { ascending: true });
+    return fetchAllRows<ScheduleItem>((rangeFrom, rangeTo) => {
+      let query = this.db
+        .from("schedule_items")
+        .select("*")
+        .eq("user_id", userId)
+        .order("scheduled_date", { ascending: true })
+        .order("position", { ascending: true })
+        .order("id", { ascending: true });
 
-    if (from) query = query.gte("scheduled_date", from);
-    if (to) query = query.lte("scheduled_date", to);
+      if (from) query = query.gte("scheduled_date", from);
+      if (to) query = query.lte("scheduled_date", to);
 
-    const { data, error } = await query;
-    if (error) throw error;
-    return (data ?? []) as ScheduleItem[];
+      return query.range(rangeFrom, rangeTo);
+    });
   }
 
   async createSchedule(
@@ -71,12 +80,39 @@ export class ScheduleRepository {
       document_id?: string | null;
     }>,
   ): Promise<ScheduleItem[]> {
-    const { data, error } = await this.db
-      .from("schedule_items")
-      .insert(items)
-      .select("*");
+    if (items.length === 0) return [];
 
-    if (error) throw error;
-    return (data ?? []) as ScheduleItem[];
+    // PostgREST max_rows também limita o retorno do INSERT…SELECT.
+    // Chunks abaixo do limite evitam subcontar sessões criadas.
+    const created: ScheduleItem[] = [];
+    for (let i = 0; i < items.length; i += INSERT_CHUNK) {
+      const chunk = items.slice(i, i + INSERT_CHUNK);
+      if (chunk.length > POSTGREST_MAX_ROWS) {
+        throw new AppError(
+          "Lote de sessões excede o limite do PostgREST",
+          500,
+          "SCHEDULE_INSERT_TOO_LARGE",
+        );
+      }
+
+      const { data, error } = await this.db
+        .from("schedule_items")
+        .insert(chunk)
+        .select("*");
+
+      if (error) throw error;
+
+      const rows = (data ?? []) as ScheduleItem[];
+      if (rows.length !== chunk.length) {
+        throw new AppError(
+          "Falha ao persistir sessões do cronograma (retorno truncado)",
+          500,
+          "SCHEDULE_INSERT_TRUNCATED",
+        );
+      }
+      created.push(...rows);
+    }
+
+    return created;
   }
 }
