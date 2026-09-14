@@ -21,10 +21,18 @@ export const updateDocumentSchema = z.object({
   contentText: z.string().optional(),
 });
 
+/** Máximo de sessões por generate_schedule (1 tópico/dia). */
+export const MAX_SCHEDULE_TOPICS = 90;
+/** Horizonte máximo a partir de hoje para targetDate. */
+export const MAX_SCHEDULE_HORIZON_DAYS = 90;
+
 export const generateScheduleSchema = z
   .object({
     title: nameSchema,
-    topics: z.array(z.string().trim().min(1)).min(1),
+    topics: z
+      .array(z.string().trim().min(1).max(200))
+      .min(1)
+      .max(MAX_SCHEDULE_TOPICS),
     targetDate: z.string().date().optional(),
     dailyMinutes: z.number().int().min(15).max(480).optional().default(30),
   })
@@ -38,6 +46,15 @@ export const generateScheduleSchema = z
           code: "custom",
           path: ["targetDate"],
           message: "target_date não pode estar no passado",
+        });
+      }
+      const maxTarget = new Date(today);
+      maxTarget.setDate(maxTarget.getDate() + MAX_SCHEDULE_HORIZON_DAYS);
+      if (target > maxTarget) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["targetDate"],
+          message: `target_date não pode passar de ${MAX_SCHEDULE_HORIZON_DAYS} dias`,
         });
       }
     }

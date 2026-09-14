@@ -7,6 +7,7 @@ import {
   ScheduleCalendar,
   type ScheduleItem,
 } from "@/components/ScheduleCalendar";
+import { defaultAgendaWindow } from "@/lib/agenda-window";
 
 export default function AgendaPage() {
   const [items, setItems] = useState<ScheduleItem[]>([]);
@@ -25,7 +26,12 @@ export default function AgendaPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/schedules");
+        // Janela explícita: sem from/to o ASC + max_rows=1000 do PostgREST
+        // descartava sessões futuras quando havia 1000+ itens históricos.
+        const { from, to } = defaultAgendaWindow();
+        const res = await fetch(
+          `/api/schedules?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+        );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error?.message ?? "Erro");
         setItems(json.data.items);
