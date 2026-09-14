@@ -20,8 +20,7 @@ cp .env.example .env.local
 ### Banco
 
 ```bash
-npx supabase init   # se ainda não houver config
-npx supabase db reset
+pnpm db:reset
 # ou aplique supabase/migrations/20260728220000_phase1_schema.sql no SQL Editor
 ```
 
@@ -40,6 +39,15 @@ Rotas autenticadas: `/pastas`, `/agenda`, `/formularios`, `/agente`.
 ```bash
 IA_ESTUDAR_USER_ID=<uuid-da-tabela-users> pnpm mcp
 ```
+
+## Documentação de engenharia
+
+| Doc | Conteúdo |
+| --- | --- |
+| [Arquitetura](docs/architecture.md) | Camadas, auth, domínio, rate limits |
+| [API HTTP](docs/api.md) | Endpoints, payloads e constraints |
+| [Agente MCP](docs/agent-mcp.md) | Tools, streaming NDJSON, stdio |
+| [Setup e troubleshooting](docs/troubleshooting.md) | Env, pitfalls, scripts |
 
 ## Sucesso da Fase 1
 
