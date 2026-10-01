@@ -19,9 +19,11 @@ type ChatMessage = {
 
 type Props = {
   onToolCallPreview: (tool: string, input: unknown) => void;
+  /** Fired when a tool finishes successfully (status=executed). */
+  onToolExecuted?: (tool: string, input: unknown) => void;
 };
 
-export function AgentChat({ onToolCallPreview }: Props) {
+export function AgentChat({ onToolCallPreview, onToolExecuted }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | undefined>();
@@ -95,9 +97,11 @@ export function AgentChat({ onToolCallPreview }: Props) {
             );
           }
 
-          if (event.toolCall) {
+                          if (event.toolCall) {
             if (event.toolCall.status === "pending_confirmation") {
               onToolCallPreview(event.toolCall.name, event.toolCall.input);
+            } else if (event.toolCall.status === "executed") {
+              onToolExecuted?.(event.toolCall.name, event.toolCall.input);
             }
             setMessages((prev) =>
               prev.map((m) =>

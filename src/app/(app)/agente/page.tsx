@@ -15,14 +15,25 @@ export default function AgentePage() {
       <AgentChat
         onToolCallPreview={(tool, input) => {
           setLastPreview({ tool, input });
+          if (tool === "generate_schedule") {
+            toast.message("Cronograma em preview — confirme para criar");
+          }
+          if (tool === "generate_form") {
+            toast.message("Formulário em preview — confirme para criar");
+          }
+        }}
+        onToolExecuted={(tool) => {
+          if (tool === "create_folder") {
+            toast.success("Pasta criada");
+          }
           if (tool === "create_document") {
             toast.success("Documento criado");
           }
           if (tool === "generate_schedule") {
-            toast.success("Cronograma em preview / gerado");
+            toast.success("Cronograma gerado");
           }
           if (tool === "generate_form") {
-            toast.success("Formulário em preview / pronto");
+            toast.success("Formulário gerado");
           }
         }}
       />
