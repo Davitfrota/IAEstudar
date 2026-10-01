@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { EmptyState } from "@/components/EmptyState";
 import { FolderTree } from "@/components/FolderTree";
 import { AgentChat } from "@/components/AgentChat";
+import { shouldRefreshFolderTree } from "@/components/agent-tool-events";
 
 type Folder = {
   id: string;
@@ -113,7 +114,11 @@ export default function PastasPage() {
         <AgentChat
           onToolCallPreview={(tool, input) => {
             setPreview({ tool, input });
-            void load();
+          }}
+          onToolExecuted={(tool) => {
+            if (shouldRefreshFolderTree(tool, "executed")) {
+              void load();
+            }
           }}
         />
       </aside>
