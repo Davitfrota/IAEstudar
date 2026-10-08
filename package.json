@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test tests/unit/**/*.test.ts",
     "mcp": "tsx src/server/mcp/stdio-server.ts",
     "db:start": "supabase start",
     "db:reset": "supabase db reset"
