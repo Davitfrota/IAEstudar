@@ -2,6 +2,16 @@ import { z } from "zod";
 
 export const nameSchema = z.string().trim().min(1).max(200);
 
+/**
+ * Título opcional em PATCH: string vazia/whitespace vira `undefined`
+ * para não invalidar o body inteiro (o autosave sempre manda title + content).
+ */
+export const optionalUpdateTitleSchema = z.preprocess((val) => {
+  if (typeof val !== "string") return val;
+  const trimmed = val.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}, nameSchema.optional());
+
 export const createFolderSchema = z.object({
   name: nameSchema,
   parentFolderId: z.string().uuid().optional().nullable(),
@@ -15,7 +25,7 @@ export const createDocumentSchema = z.object({
 });
 
 export const updateDocumentSchema = z.object({
-  title: nameSchema.optional(),
+  title: optionalUpdateTitleSchema,
   folderId: z.string().uuid().nullable().optional(),
   content: z.unknown().optional(),
   contentText: z.string().optional(),
