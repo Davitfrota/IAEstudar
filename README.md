@@ -20,12 +20,12 @@ cp .env.example .env.local
 ### Banco
 
 ```bash
-npx supabase init   # se ainda não houver config
-npx supabase db reset
+pnpm db:start   # opcional (Supabase local)
+pnpm db:reset
 # ou aplique supabase/migrations/20260728220000_phase1_schema.sql no SQL Editor
 ```
 
-Configure o Clerk como provedor JWT no Supabase (Third-Party Auth) para que `auth.jwt()->>'sub'` = `clerk_id` e o RLS funcione no client. As rotas `/api/*` usam `SUPABASE_SERVICE_ROLE_KEY` e sempre escopam por `user.id` interno resolvido do Clerk.
+As rotas `/api/*` usam `SUPABASE_SERVICE_ROLE_KEY` e sempre escopam por `user.id` interno resolvido do Clerk. Na Fase 1 não há cliente Supabase no browser; o RLS (Clerk Third-Party Auth, `auth.jwt()->>'sub'` = `clerk_id`) vale se você consultar o Postgres fora das APIs.
 
 ### Dev
 
@@ -40,6 +40,17 @@ Rotas autenticadas: `/pastas`, `/agenda`, `/formularios`, `/agente`.
 ```bash
 IA_ESTUDAR_USER_ID=<uuid-da-tabela-users> pnpm mcp
 ```
+
+## Documentação de engenharia
+
+| Doc | Conteúdo |
+| --- | --- |
+| [Arquitetura](docs/architecture.md) | Camadas, auth, UI↔API, domínio, rate limits |
+| [API HTTP](docs/api.md) | Endpoints, payloads e constraints |
+| [Agente MCP](docs/agent-mcp.md) | Tools, streaming NDJSON, stdio |
+| [Setup e troubleshooting](docs/troubleshooting.md) | Env, pitfalls, scripts |
+
+Verificado contra `main` @ `00966ff` (Fase 1). Ramos WIP (Fase 2 / bugfixes em draft) não entram nestes docs até o merge.
 
 ## Sucesso da Fase 1
 
